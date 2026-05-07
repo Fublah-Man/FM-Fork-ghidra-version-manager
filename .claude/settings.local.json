@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(pip install -e \"F:/Software/Git Repos/FM-Fork-ghidra-version-manager\")",
+      "Bash(git commit -m ' *)",
+      "Bash(gh pr create --title 'Fix pyproject.toml compatibility with modern setuptools' --body ' *)",
+      "PowerShell(Get-Command gh -ErrorAction SilentlyContinue; where.exe gh 2>$null; Test-Path \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\"; Test-Path \"$env:LOCALAPPDATA\\\\GitHub CLI\\\\gh.exe\")"
+    ]
+  }
+}

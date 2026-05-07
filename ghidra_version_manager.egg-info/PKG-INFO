@@ -1,0 +1,87 @@
+Metadata-Version: 2.4
+Name: ghidra-version-manager
+Version: 0.7.1
+Summary: Ghidra Version Manager
+Author-email: CUB3D <callumthom11@gmail.com>
+License: GPL-3.0-only
+Project-URL: Homepage, https://github.com/CUB3D/ghidra-version-manager
+Project-URL: Repository, https://github.com/CUB3D/ghidra-version-manager
+Keywords: ghidra
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.32
+Requires-Dist: tqdm>=4.67
+Requires-Dist: tomli-w>=1.1
+Requires-Dist: pillow>=11.0
+Provides-Extra: notifications
+Requires-Dist: plyer>=2.1; extra == "notifications"
+Dynamic: license-file
+
+# GVM
+Ghidra Version Manager is a utility to manage and update your Ghidra versions and extensions
+
+Supports Linux, macOS and Windows
+
+## Installing
+### Stable Version
+```shell
+cargo install ghidra-version-manager
+```
+### Latest Version
+```shell
+cargo install --git https://github.com/CUB3D/ghidra-version-manager
+```
+
+This will download and extract the selected version. On linux it will create a `.desktop` entry as well.
+On macOS it will create a launcher app in `/Applications` for spotlight integration.
+
+# Usage
+In places where a version is specified you can also use "default" for your selected default version or "latest" for the latest release
+
+## Install a new version
+```shell
+gvm install Ghidra_11.4_build
+```
+
+## Run it
+```shell
+# Run the default one
+gvm run
+# Or specify
+gvm run Ghidra_11.2_build
+```
+
+## Update it
+```shell
+gvm update
+```
+
+## Change your default version
+```shell
+gvm default set Ghidra_11.2_build
+gvm default show
+```
+
+## Install a third-party Processor
+```shell
+gvm extensions install PDK
+```
+
+## List known extensions
+```shell
+gvm extensions list
+```
+
+## Uninstall a version
+```shell
+gvm uninstall Ghidra_11.4_build
+```
+
+## List Ghidra versions
+```shell
+gvm list
+```
+
+# License
+GPL3

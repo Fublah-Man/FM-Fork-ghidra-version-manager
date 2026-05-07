@@ -1,0 +1,7 @@
+requests>=2.32
+tqdm>=4.67
+tomli-w>=1.1
+pillow>=11.0
+
+[notifications]
+plyer>=2.1
