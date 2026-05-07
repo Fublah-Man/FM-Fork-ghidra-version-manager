@@ -1,6 +1,6 @@
 [build-system]
 requires = ["setuptools>=61.0"]
-build-backend = "setuptools.backends.legacy:build"
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghidra-version-manager"
@@ -9,8 +9,6 @@ description = "Ghidra Version Manager"
 license = {text = "GPL-3.0-only"}
 authors = [{name = "CUB3D", email = "callumthom11@gmail.com"}]
 readme = "README.md"
-homepage = "https://github.com/CUB3D/ghidra-version-manager"
-repository = "https://github.com/CUB3D/ghidra-version-manager"
 keywords = ["ghidra"]
 requires-python = ">=3.11"
 dependencies = [
@@ -25,6 +23,10 @@ notifications = ["plyer>=2.1"]
 
 [project.scripts]
 gvm = "gvm.main:main"
+
+[project.urls]
+Homepage = "https://github.com/CUB3D/ghidra-version-manager"
+Repository = "https://github.com/CUB3D/ghidra-version-manager"
 
 [tool.setuptools.packages.find]
 where = ["."]
