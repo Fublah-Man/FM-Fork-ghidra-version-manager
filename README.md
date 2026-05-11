@@ -83,6 +83,10 @@ gvm run Ghidra_11.2_build
 
 # or
 gvm r Ghidra_11.2_build
+
+# Launch with PyGhidra for this run only (doesn't change the pref)
+gvm run -py
+gvm run -py Ghidra_11.4_build
 ```
 
 If you switch from one version to another, GVM automatically backs up and restores your Ghidra preferences (Linux/macOS).

@@ -117,6 +117,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("tag", help="Which version to install")
 
     p = sub.add_parser("run", aliases=["r"], help="Launch Ghidra")
+    p.add_argument("-py", action="store_true", dest="pyghidra_once", help="Use PyGhidra for this launch only")
     p.add_argument("tag", nargs="?", default=None, help="Override the version to run")
 
     p = sub.add_parser("uninstall", aliases=["del"], help="Remove a Ghidra version")
@@ -247,7 +248,8 @@ def main() -> None:
         entry = cacher.cache.entries[tag]
         install_path = Path(entry.path)
 
-        if cacher.cache.prefs.pyghidra:
+        use_pyghidra = args.pyghidra_once or cacher.cache.prefs.pyghidra
+        if use_pyghidra:
             runner = install_path / ("support/pyghidraRun" if sys.platform != "win32" else "support/pyghidraRun.bat")
         elif sys.platform != "win32":
             runner = install_path / "ghidraRun"
