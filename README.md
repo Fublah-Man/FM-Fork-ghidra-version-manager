@@ -156,6 +156,12 @@ gvm prefs set install_dir D:\Ghidra
 
 # Reset back to the default install directory
 gvm prefs set install_dir default
+
+# Set a directory containing local extensions
+gvm prefs set ext_dir D:\GhidraExtensions
+
+# Clear the extensions directory
+gvm prefs set ext_dir default
 ```
 
 | Preference | Values | Description |
@@ -163,6 +169,7 @@ gvm prefs set install_dir default
 | `py3` | `true` / `false` | Use PyGhidra runner instead of the standard launcher |
 | `scale` | integer | Override the UI scale factor in `launch.properties` |
 | `install_dir` | path / `default` | Directory where Ghidra versions are installed. Set to `default` to reset |
+| `ext_dir` | path / `default` | Directory to scan for local extensions. Set to `default` to clear |
 
 ### Preferences backup and restore
 
@@ -200,7 +207,13 @@ gvm extensions install PDK Ghidra_11.4_build
 gvm extensions uninstall FindCrypt
 # or
 gvm e rm FindCrypt
+
+# Scan the configured extensions directory and register found extensions
+gvm extensions scan
+gvm extensions scan Ghidra_11.4_build
 ```
+
+The `scan` command walks the directory set via `gvm prefs set ext_dir <path>` and discovers Ghidra extensions — both unpacked directories (containing `extension.properties`) and `.zip` files. Discovered extensions are registered for the specified (or default) Ghidra version.
 
 #### Available extensions
 
@@ -276,6 +289,9 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 | TOML-based cache | Yes | Yes |
 | Download progress bar | Yes | Yes |
 | Command aliases (`ls`, `i`, `r`, `del`, etc.) | Yes | Yes |
+| Local extensions directory + scan | No | Yes |
+| One-shot PyGhidra launch (`-py`) | No | Yes |
+| Custom install directory | No | Yes |
 | Windows desktop launcher creation | No | No |
 
 **Differences:**

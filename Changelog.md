@@ -20,6 +20,7 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 #### Added
 - **Custom install directory** (`gvm prefs set install_dir <path>`): Ghidra versions can now be installed to a user-specified directory instead of the platform default. Use `gvm prefs set install_dir default` to reset. The GVM cache file always remains at the platform default location.
+- **Extensions directory and scan** (`gvm prefs set ext_dir <path>` + `gvm extensions scan`): Point GVM at a folder of local Ghidra extensions (unpacked directories with `extension.properties` or `.zip` files) and scan to register them for a Ghidra version. Use `gvm prefs set ext_dir default` to clear.
 - **`-py` flag for `gvm run`**: launch Ghidra with PyGhidra for a single run without changing the persistent `py3` preference. Usage: `gvm run -py` or `gvm run -py <version>`.
 - **Windows settings backup/restore**: `gvm settings backup` and `gvm settings restore` now work on Windows (reading from `%APPDATA%\ghidra\<version>\preferences`). Previously these were blocked with "only supported on unix".
 - **Windows automatic preference migration**: switching Ghidra versions via `gvm run` or `gvm update` now automatically backs up and restores preferences on Windows, matching the existing Linux/macOS behavior.
@@ -39,6 +40,7 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 | Auto-migrate prefs on version switch | Linux/macOS only | All platforms |
 | One-shot PyGhidra launch (`-py`) | Not available | Available |
 | Custom install directory | Not available | Available |
+| Local extensions directory + scan | Not available | Available |
 | Install method | Requires Rust toolchain | `pip install` with Python 3.11+ |
 
 ---

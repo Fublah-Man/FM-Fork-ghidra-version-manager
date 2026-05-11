@@ -139,7 +139,7 @@ def build_parser() -> argparse.ArgumentParser:
     psub = pp.add_subparsers(dest="prefs_cmd", required=True)
     psub.add_parser("show", help="Display current preferences")
     p = psub.add_parser("set", help="Set a preference")
-    p.add_argument("key", help="Key to set (py3, scale, install_dir)")
+    p.add_argument("key", help="Key to set (py3, scale, install_dir, ext_dir)")
     p.add_argument("value", help="New value")
 
     ep = sub.add_parser("extensions", aliases=["e"], help="Manage extensions")
@@ -150,6 +150,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("ghidra_version", nargs="?", default=None)
     p = esub.add_parser("uninstall", aliases=["rm"], help="Remove an extension")
     p.add_argument("name")
+    p.add_argument("ghidra_version", nargs="?", default=None)
+    p = esub.add_parser("scan", help="Scan the extensions directory and add found extensions")
     p.add_argument("ghidra_version", nargs="?", default=None)
 
     sp = sub.add_parser("settings", help="Manage Ghidra settings")
@@ -325,6 +327,8 @@ def main() -> None:
             install_display = cacher.cache.prefs.install_dir or str(default_path)
             is_custom = " (custom)" if cacher.cache.prefs.install_dir else " (default)"
             logger.info("Install directory {install_dir} [%s]%s", install_display, is_custom)
+            ext_display = cacher.cache.prefs.ext_dir or "not set"
+            logger.info("Extensions directory {ext_dir} [%s]", ext_display)
         elif pcmd == "set":
             if args.key == "py3":
                 cacher.cache.prefs.pyghidra = args.value.lower() == "true"
@@ -343,6 +347,19 @@ def main() -> None:
                     cacher.cache.prefs.install_dir = str(resolved)
                     cacher.save()
                     logger.info("Install directory set to: %s", resolved)
+            elif args.key == "ext_dir":
+                if args.value.lower() == "default":
+                    cacher.cache.prefs.ext_dir = ""
+                    cacher.save()
+                    logger.info("Extensions directory cleared")
+                else:
+                    resolved = Path(args.value).resolve()
+                    if not resolved.is_dir():
+                        logger.error("Directory does not exist: %s", resolved)
+                        return
+                    cacher.cache.prefs.ext_dir = str(resolved)
+                    cacher.save()
+                    logger.info("Extensions directory set to: %s", resolved)
             else:
                 logger.error("Unknown key")
 

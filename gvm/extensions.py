@@ -43,6 +43,9 @@ def handle_ext_cmd(cacher: Cacher, path: Path, args) -> None:
     elif cmd in ("uninstall", "rm"):
         _ext_uninstall(cacher, args)
 
+    elif cmd == "scan":
+        _ext_scan(cacher, args)
+
 
 def _ext_install(cacher: Cacher, path: Path, args) -> None:
     ghidra_version = getattr(args, "ghidra_version", None) or cacher.default_explicit()
@@ -225,3 +228,120 @@ def _ext_uninstall(cacher: Cacher, args) -> None:
             else:
                 logger.info("rmdir %s", p)
                 shutil.rmtree(p, ignore_errors=True)
+
+
+def _parse_extension_properties(props_path: Path) -> dict[str, str]:
+    """Parse a Ghidra extension.properties file into a dict."""
+    props: dict[str, str] = {}
+    for line in props_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, value = line.partition("=")
+            props[key.strip()] = value.strip()
+    return props
+
+
+def _scan_ext_dir(ext_dir: Path) -> list[dict]:
+    """Walk ext_dir and discover extensions.
+
+    Looks for:
+      1. Directories containing an extension.properties file (unpacked extensions)
+      2. .zip files that contain an extension.properties at their root (packed extensions)
+
+    Returns a list of dicts with 'name', 'path', and 'source' keys.
+    """
+    import zipfile
+
+    found: list[dict] = []
+
+    for item in sorted(ext_dir.iterdir()):
+        # Unpacked extension directory
+        if item.is_dir():
+            props_file = item / "extension.properties"
+            if props_file.is_file():
+                props = _parse_extension_properties(props_file)
+                name = props.get("name", item.name)
+                found.append({"name": name, "path": str(item), "source": "directory"})
+            # Also check for a manifest at one level deeper (some extensions
+            # extract with a wrapper folder)
+            else:
+                for sub in item.iterdir():
+                    sub_props = sub / "extension.properties" if sub.is_dir() else None
+                    if sub_props and sub_props.is_file():
+                        props = _parse_extension_properties(sub_props)
+                        name = props.get("name", sub.name)
+                        found.append({"name": name, "path": str(sub), "source": "directory"})
+
+        # Packed extension zip
+        elif item.is_file() and item.suffix.lower() == ".zip":
+            try:
+                with zipfile.ZipFile(item, "r") as zf:
+                    # extension.properties may be at the root or one level deep
+                    props_entry = None
+                    for zi in zf.namelist():
+                        basename = zi.rsplit("/", 1)[-1] if "/" in zi else zi
+                        depth = zi.count("/")
+                        if basename == "extension.properties" and depth <= 1:
+                            props_entry = zi
+                            break
+
+                    if props_entry:
+                        raw = zf.read(props_entry).decode("utf-8", errors="replace")
+                        props: dict[str, str] = {}
+                        for line in raw.splitlines():
+                            line = line.strip()
+                            if line and not line.startswith("#") and "=" in line:
+                                k, _, v = line.partition("=")
+                                props[k.strip()] = v.strip()
+                        name = props.get("name", item.stem)
+                    else:
+                        name = item.stem
+
+                    found.append({"name": name, "path": str(item), "source": "zip"})
+            except zipfile.BadZipFile:
+                logger.warning("Skipping invalid zip: %s", item.name)
+
+    return found
+
+
+def _ext_scan(cacher: Cacher, args) -> None:
+    ext_dir_str = cacher.cache.prefs.ext_dir
+    if not ext_dir_str:
+        logger.error("No extensions directory configured. Set one with: gvm prefs set ext_dir <path>")
+        return
+
+    ext_dir = Path(ext_dir_str)
+    if not ext_dir.is_dir():
+        logger.error("Extensions directory does not exist: %s", ext_dir)
+        return
+
+    ghidra_version = getattr(args, "ghidra_version", None) or cacher.default_explicit()
+    if not cacher.is_installed(ghidra_version):
+        logger.error("Version '%s' isn't installed!", ghidra_version)
+        return
+
+    found = _scan_ext_dir(ext_dir)
+    if not found:
+        logger.info("No extensions found in %s", ext_dir)
+        return
+
+    ghidra_entry = cacher.cache.entries[ghidra_version]
+    added = 0
+
+    for ext in found:
+        slug = f"local-{ext['name'].lower().replace(' ', '-')}"
+        if slug in ghidra_entry.extensions:
+            logger.debug("Already registered: %s", ext["name"])
+            continue
+
+        ghidra_entry.extensions[slug] = ExtEntry(files=[ext["path"]])
+        logger.info("Added: %s (%s) -> %s", ext["name"], ext["source"], ext["path"])
+        added += 1
+
+    if added:
+        cacher.save()
+        logger.info("Registered %d extension(s) for %s", added, ghidra_version)
+    else:
+        logger.info("All extensions already registered")

@@ -52,11 +52,14 @@ class Prefs:
     pyghidra: bool = False
     ui_scale_override: int = 1
     install_dir: str = ""
+    ext_dir: str = ""
 
     def to_dict(self) -> dict:
         d: dict = {"pyghidra": self.pyghidra, "ui_scale_override": self.ui_scale_override}
         if self.install_dir:
             d["install_dir"] = self.install_dir
+        if self.ext_dir:
+            d["ext_dir"] = self.ext_dir
         return d
 
     @classmethod
@@ -65,6 +68,7 @@ class Prefs:
             pyghidra=d.get("pyghidra", False),
             ui_scale_override=d.get("ui_scale_override", 1),
             install_dir=d.get("install_dir", ""),
+            ext_dir=d.get("ext_dir", ""),
         )
 
 
