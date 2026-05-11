@@ -7,8 +7,10 @@ name = "ghidra-version-manager"
 version = "0.1"
 description = "Ghidra Version Manager - Python conversion"
 license = {text = "GPL-3.0-only"}
-original_author = [{name = "CUB3D", email = "callumthom11@gmail.com"}]
-author = [{name = "Fublah-Man", email = "fublahman@gmail.com"}]
+authors = [
+    {name = "Fublah-Man", email = "fublahman@gmail.com"},
+    {name = "CUB3D", email = "callumthom11@gmail.com"},
+]
 readme = "README.md"
 keywords = ["ghidra"]
 requires-python = ">=3.11"

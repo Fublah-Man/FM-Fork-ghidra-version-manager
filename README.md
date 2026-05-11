@@ -146,12 +146,19 @@ gvm prefs set py3 true
 
 # Override UI scale (useful for HiDPI displays)
 gvm prefs set scale 2
+
+# Set a custom install directory
+gvm prefs set install_dir D:\Ghidra
+
+# Reset back to the default install directory
+gvm prefs set install_dir default
 ```
 
 | Preference | Values | Description |
 |---|---|---|
 | `py3` | `true` / `false` | Use PyGhidra runner instead of the standard launcher |
 | `scale` | integer | Override the UI scale factor in `launch.properties` |
+| `install_dir` | path / `default` | Directory where Ghidra versions are installed. Set to `default` to reset |
 
 ### Preferences backup and restore (Linux/macOS)
 

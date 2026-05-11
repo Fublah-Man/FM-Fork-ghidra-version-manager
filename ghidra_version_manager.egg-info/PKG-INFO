@@ -1,11 +1,11 @@
 Metadata-Version: 2.4
 Name: ghidra-version-manager
-Version: 0.7.1
-Summary: Ghidra Version Manager
-Author-email: CUB3D <callumthom11@gmail.com>
+Version: 0.1
+Summary: Ghidra Version Manager - Python conversion
+Author-email: Fublah-Man <fublahman@gmail.com>, CUB3D <callumthom11@gmail.com>
 License: GPL-3.0-only
-Project-URL: Homepage, https://github.com/CUB3D/ghidra-version-manager
-Project-URL: Repository, https://github.com/CUB3D/ghidra-version-manager
+Project-URL: Python_Repository, https://github.com/Fublah-Man/FM-Fork-ghidra-version-manager
+Project-URL: Rust_Repository, https://github.com/CUB3D/ghidra-version-manager
 Keywords: ghidra
 Requires-Python: >=3.11
 Description-Content-Type: text/markdown
@@ -18,70 +18,289 @@ Provides-Extra: notifications
 Requires-Dist: plyer>=2.1; extra == "notifications"
 Dynamic: license-file
 
-# GVM
-Ghidra Version Manager is a utility to manage and update your Ghidra versions and extensions
+# GVM - Ghidra Version Manager
 
-Supports Linux, macOS and Windows
+A command-line utility to install, manage, and update [Ghidra](https://ghidra-sre.org/) versions and extensions.
+
+Supports **Linux**, **macOS**, and **Windows**.
+
+> This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D/ghidra-version-manager) (originally written in Rust).
+
+---
 
 ## Installing
-### Stable Version
+
+### Prerequisites
+
+- **Python 3.11+**
+- **JDK 21+** (required by Ghidra 11+) - GVM will check for this and suggest install commands for your platform if missing.
+
+### From source (editable)
+
 ```shell
-cargo install ghidra-version-manager
+pip install -e .
 ```
-### Latest Version
+
+### With notification support
+
 ```shell
-cargo install --git https://github.com/CUB3D/ghidra-version-manager
+pip install -e ".[notifications]"
 ```
 
-This will download and extract the selected version. On linux it will create a `.desktop` entry as well.
-On macOS it will create a launcher app in `/Applications` for spotlight integration.
+---
 
-# Usage
-In places where a version is specified you can also use "default" for your selected default version or "latest" for the latest release
+## Quick Start
 
-## Install a new version
+```shell
+# See what's available
+gvm list
+
+# Install the latest Ghidra
+gvm install latest
+
+# Launch it
+gvm run
+```
+
+---
+
+## Usage Guide
+
+In any command that takes a version, you can use:
+- A specific tag like `Ghidra_11.4_build`
+- `latest` for the most recent release
+- `default` for your configured default version
+
+### List available versions
+
+```shell
+gvm list
+# or
+gvm ls
+```
+
+Fetches all Ghidra releases from the official NSA GitHub repository.
+
+### Install a version
+
 ```shell
 gvm install Ghidra_11.4_build
+gvm install latest
+# or
+gvm i latest
 ```
 
-## Run it
+Downloads and extracts the release. On Linux, a `.desktop` launcher entry is created. On macOS, a `.app` bundle is placed in `/Applications` for Spotlight integration.
+
+### Run Ghidra
+
 ```shell
-# Run the default one
+# Launch the default version
 gvm run
-# Or specify
+
+# Launch a specific version
 gvm run Ghidra_11.2_build
+
+# or
+gvm r Ghidra_11.2_build
 ```
 
-## Update it
-```shell
-gvm update
-```
+If you switch from one version to another, GVM automatically backs up and restores your Ghidra preferences (Linux/macOS).
 
-## Change your default version
+### Set your default version
+
 ```shell
-gvm default set Ghidra_11.2_build
+gvm default set Ghidra_11.4_build
 gvm default show
 ```
 
-## Install a third-party Processor
+Setting a default lets you run `gvm run` without specifying a version every time.
+
+### Update to the latest version
+
 ```shell
-gvm extensions install PDK
+gvm update
+# or
+gvm u
 ```
 
-## List known extensions
+Downloads and installs the latest release. Your preferences are automatically migrated.
+
+### Check for updates
+
 ```shell
-gvm extensions list
+gvm check-update
+# or
+gvm U
 ```
 
-## Uninstall a version
+Forces an update check against the GitHub API and displays the latest available version.
+
+### Uninstall a version
+
 ```shell
 gvm uninstall Ghidra_11.4_build
+# or
+gvm del Ghidra_11.4_build
 ```
 
-## List Ghidra versions
+### Locate an installation on disk
+
 ```shell
-gvm list
+gvm locate
+gvm locate Ghidra_11.4_build
 ```
 
-# License
-GPL3
+Prints the filesystem path to the specified (or default) Ghidra installation.
+
+### Preferences
+
+```shell
+# Show current preferences
+gvm prefs show
+# or
+gvm p show
+
+# Enable PyGhidra launcher
+gvm prefs set py3 true
+
+# Override UI scale (useful for HiDPI displays)
+gvm prefs set scale 2
+
+# Set a custom install directory
+gvm prefs set install_dir D:\Ghidra
+
+# Reset back to the default install directory
+gvm prefs set install_dir default
+```
+
+| Preference | Values | Description |
+|---|---|---|
+| `py3` | `true` / `false` | Use PyGhidra runner instead of the standard launcher |
+| `scale` | integer | Override the UI scale factor in `launch.properties` |
+| `install_dir` | path / `default` | Directory where Ghidra versions are installed. Set to `default` to reset |
+
+### Preferences backup and restore (Linux/macOS)
+
+```shell
+# Back up preferences for the default version
+gvm settings backup my_prefs.zip
+
+# Back up a specific version's preferences
+gvm settings backup my_prefs.zip Ghidra_11.4_build
+
+# Restore preferences
+gvm settings restore my_prefs.zip
+gvm settings restore my_prefs.zip Ghidra_11.4_build
+```
+
+Preferences are stored as ZIP archives containing the Ghidra preferences file and a GVM metadata config.
+
+### Extensions
+
+GVM ships with a built-in registry of 27 third-party extensions.
+
+```shell
+# List all known extensions
+gvm extensions list
+# or
+gvm e ls
+
+# Install an extension to the default Ghidra version
+gvm extensions install FindCrypt
+
+# Install to a specific version
+gvm extensions install PDK Ghidra_11.4_build
+
+# Uninstall an extension
+gvm extensions uninstall FindCrypt
+# or
+gvm e rm FindCrypt
+```
+
+#### Available extensions
+
+**Processor Architectures (19):** 4004, Allegrex, Alpha, Amiga, C166, CSKY, EFI, Hexagon, iRISC, M16C, MCORE, nanoMIPS, niosII, PDK, PicoBlaze, RL78, RX, Score7, STM-8
+
+**Exporters (2):** BinExport, Delinker
+
+**Loaders (3):** DTB, NTR, XBE
+
+**Tools (3):** AssistMCP, FindCrypt, Markdown Notepad
+
+Extensions are either downloaded as release assets (manual install via Ghidra UI) or cloned and extracted as processor modules, depending on their type.
+
+### Global flags
+
+| Flag | Description |
+|---|---|
+| `-v`, `--verbose` | Enable detailed logging output |
+| `-o`, `--offline` | Disable all network access (use cached data only) |
+| `-l`, `--launcher` | Run in launcher mode |
+
+---
+
+## Configuration
+
+GVM stores its state in a `cache.toml` file:
+
+| Platform | Path |
+|---|---|
+| Windows | `%LOCALAPPDATA%\gvm\cache.toml` |
+| Linux / macOS | `~/.local/opt/gvm/cache.toml` |
+
+This file tracks installed versions, extensions, preferences, default version, and update-check timestamps. It is managed automatically by GVM.
+
+---
+
+## Platform behavior
+
+| Feature | Windows | macOS | Linux |
+|---|---|---|---|
+| Install path | `%LOCALAPPDATA%\gvm\` | `~/.local/opt/gvm/` | `~/.local/opt/gvm/` |
+| Desktop launcher | -- | `.app` in `/Applications` | `.desktop` file |
+| Preferences backup/restore | Not supported | Supported | Supported |
+| Ghidra runner | `ghidraRun.bat` | `ghidraRun` | `ghidraRun` |
+| PyGhidra runner | `support/pyghidraRun.bat` | `support/pyghidraRun` | `support/pyghidraRun` |
+
+---
+
+## Feature parity with the original Rust version
+
+This Python fork is a **complete port** of the original [CUB3D/ghidra-version-manager](https://github.com/CUB3D/ghidra-version-manager) Rust implementation.
+
+| Feature | Rust (original) | Python (this fork) |
+|---|---|---|
+| Install / uninstall versions | Yes | Yes |
+| Run Ghidra | Yes | Yes |
+| Default version management | Yes | Yes |
+| Update to latest | Yes | Yes |
+| Check for updates | Yes | Yes |
+| List available releases | Yes | Yes |
+| Locate installation path | Yes | Yes |
+| Extension management (install/uninstall/list) | Yes | Yes |
+| Built-in extension registry (27 extensions) | Yes | Yes |
+| Preferences (PyGhidra, UI scale) | Yes | Yes |
+| Preferences backup/restore (Linux/macOS) | Yes | Yes |
+| Auto-migrate preferences on version switch | Yes | Yes |
+| Desktop notifications (optional) | Yes | Yes |
+| Linux `.desktop` launcher | Yes | Yes |
+| macOS `.app` launcher | Yes | Yes |
+| JDK detection and install guidance | Yes | Yes |
+| Offline mode | Yes | Yes |
+| Verbose mode | Yes | Yes |
+| TOML-based cache | Yes | Yes |
+| Download progress bar | Yes | Yes |
+| Command aliases (`ls`, `i`, `r`, `del`, etc.) | Yes | Yes |
+| Windows desktop launcher creation | No | No |
+
+**Differences:**
+- **No compiled binary** - runs as a Python package via `pip install` instead of `cargo install`
+- **Fewer system dependencies** - no Rust toolchain required; just Python 3.11+
+- **`plyer` replaces `notify-rust`** for desktop notifications (optional dependency)
+
+---
+
+## License
+
+GPL-3.0-only

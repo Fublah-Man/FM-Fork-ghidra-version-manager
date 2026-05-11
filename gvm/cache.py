@@ -51,15 +51,20 @@ class CacheEntry:
 class Prefs:
     pyghidra: bool = False
     ui_scale_override: int = 1
+    install_dir: str = ""
 
     def to_dict(self) -> dict:
-        return {"pyghidra": self.pyghidra, "ui_scale_override": self.ui_scale_override}
+        d: dict = {"pyghidra": self.pyghidra, "ui_scale_override": self.ui_scale_override}
+        if self.install_dir:
+            d["install_dir"] = self.install_dir
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "Prefs":
         return cls(
             pyghidra=d.get("pyghidra", False),
             ui_scale_override=d.get("ui_scale_override", 1),
+            install_dir=d.get("install_dir", ""),
         )
 
 

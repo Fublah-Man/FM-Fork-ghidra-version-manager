@@ -135,7 +135,7 @@ def build_parser() -> argparse.ArgumentParser:
     psub = pp.add_subparsers(dest="prefs_cmd", required=True)
     psub.add_parser("show", help="Display current preferences")
     p = psub.add_parser("set", help="Set a preference")
-    p.add_argument("key", help="Key to set (py3, scale)")
+    p.add_argument("key", help="Key to set (py3, scale, install_dir)")
     p.add_argument("value", help="New value")
 
     ep = sub.add_parser("extensions", aliases=["e"], help="Manage extensions")
@@ -173,10 +173,17 @@ def main() -> None:
         logging.getLogger().setLevel(logging.DEBUG)
 
     home = Path.home()
-    path = home / ".local" / "opt" / "gvm" if sys.platform != "win32" else home / "AppData" / "Local" / "gvm"
-    path.mkdir(parents=True, exist_ok=True)
+    default_path = home / ".local" / "opt" / "gvm" if sys.platform != "win32" else home / "AppData" / "Local" / "gvm"
+    default_path.mkdir(parents=True, exist_ok=True)
 
-    cacher = Cacher.load(path / "cache.toml")
+    cacher = Cacher.load(default_path / "cache.toml")
+
+    # Use custom install directory if configured, otherwise use the default
+    if cacher.cache.prefs.install_dir:
+        path = Path(cacher.cache.prefs.install_dir)
+        path.mkdir(parents=True, exist_ok=True)
+    else:
+        path = default_path
 
     cmd = _COMMAND_ALIASES.get(args.command, args.command)
 
@@ -310,6 +317,9 @@ def main() -> None:
             yn = "yes" if cacher.cache.prefs.pyghidra else "no"
             logger.info("Use PyGhidra in launchers? {py3} [%s]", yn)
             logger.info("Override ui scale {scale} [%d]", cacher.cache.prefs.ui_scale_override)
+            install_display = cacher.cache.prefs.install_dir or str(default_path)
+            is_custom = " (custom)" if cacher.cache.prefs.install_dir else " (default)"
+            logger.info("Install directory {install_dir} [%s]%s", install_display, is_custom)
         elif pcmd == "set":
             if args.key == "py3":
                 cacher.cache.prefs.pyghidra = args.value.lower() == "true"
@@ -317,6 +327,17 @@ def main() -> None:
             elif args.key == "scale":
                 cacher.cache.prefs.ui_scale_override = int(args.value)
                 cacher.save()
+            elif args.key == "install_dir":
+                if args.value.lower() == "default":
+                    cacher.cache.prefs.install_dir = ""
+                    cacher.save()
+                    logger.info("Install directory reset to default: %s", default_path)
+                else:
+                    resolved = Path(args.value).resolve()
+                    resolved.mkdir(parents=True, exist_ok=True)
+                    cacher.cache.prefs.install_dir = str(resolved)
+                    cacher.save()
+                    logger.info("Install directory set to: %s", resolved)
             else:
                 logger.error("Unknown key")
 
