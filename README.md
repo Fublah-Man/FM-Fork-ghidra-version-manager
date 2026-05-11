@@ -1,5 +1,7 @@
 # GVM - Ghidra Version Manager
 
+> **Note:** This project was built with the assistance of [Claude Code](https://claude.ai/claude-code) by Anthropic.
+
 A command-line utility to install, manage, and update [Ghidra](https://ghidra-sre.org/) versions and extensions.
 
 Supports **Linux**, **macOS**, and **Windows**.
@@ -27,6 +29,12 @@ pip install -e .
 pip install -e ".[notifications]"
 ```
 
+### With GUI
+
+```shell
+pip install -e ".[gui]"
+```
+
 ---
 
 ## Quick Start
@@ -40,6 +48,9 @@ gvm install latest
 
 # Launch it
 gvm run
+
+# Or use the graphical interface
+gvm gui
 ```
 
 ---
@@ -227,6 +238,20 @@ The `scan` command walks the directory set via `gvm prefs set ext_dir <path>` an
 
 Extensions are either downloaded as release assets (manual install via Ghidra UI) or cloned and extracted as processor modules, depending on their type.
 
+### Graphical Interface
+
+```shell
+gvm gui
+# or launch directly
+gvm-gui
+```
+
+Requires the `gui` extra (`pip install -e ".[gui]"`). The GUI provides three tabs:
+
+- **Versions** -- browse all available releases, install/uninstall/run with one click, set your default version, and check for updates.
+- **Extensions** -- view the built-in extension registry, install or remove extensions for any installed Ghidra version, and scan a local extensions directory.
+- **Settings** -- toggle PyGhidra, set UI scale, configure install/extensions directories, and backup/restore Ghidra preferences.
+
 ### Global flags
 
 | Flag | Description |
@@ -289,6 +314,7 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 | TOML-based cache | Yes | Yes |
 | Download progress bar | Yes | Yes |
 | Command aliases (`ls`, `i`, `r`, `del`, etc.) | Yes | Yes |
+| Graphical interface (CustomTkinter) | No | Yes |
 | Local extensions directory + scan | No | Yes |
 | One-shot PyGhidra launch (`-py`) | No | Yes |
 | Custom install directory | No | Yes |

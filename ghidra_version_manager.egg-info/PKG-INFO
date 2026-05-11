@@ -16,6 +16,8 @@ Requires-Dist: tomli-w>=1.1
 Requires-Dist: pillow>=11.0
 Provides-Extra: notifications
 Requires-Dist: plyer>=2.1; extra == "notifications"
+Provides-Extra: gui
+Requires-Dist: customtkinter>=5.2; extra == "gui"
 Dynamic: license-file
 
 # GVM - Ghidra Version Manager
@@ -103,6 +105,10 @@ gvm run Ghidra_11.2_build
 
 # or
 gvm r Ghidra_11.2_build
+
+# Launch with PyGhidra for this run only (doesn't change the pref)
+gvm run -py
+gvm run -py Ghidra_11.4_build
 ```
 
 If you switch from one version to another, GVM automatically backs up and restores your Ghidra preferences (Linux/macOS).
@@ -172,6 +178,12 @@ gvm prefs set install_dir D:\Ghidra
 
 # Reset back to the default install directory
 gvm prefs set install_dir default
+
+# Set a directory containing local extensions
+gvm prefs set ext_dir D:\GhidraExtensions
+
+# Clear the extensions directory
+gvm prefs set ext_dir default
 ```
 
 | Preference | Values | Description |
@@ -179,8 +191,9 @@ gvm prefs set install_dir default
 | `py3` | `true` / `false` | Use PyGhidra runner instead of the standard launcher |
 | `scale` | integer | Override the UI scale factor in `launch.properties` |
 | `install_dir` | path / `default` | Directory where Ghidra versions are installed. Set to `default` to reset |
+| `ext_dir` | path / `default` | Directory to scan for local extensions. Set to `default` to clear |
 
-### Preferences backup and restore (Linux/macOS)
+### Preferences backup and restore
 
 ```shell
 # Back up preferences for the default version
@@ -216,7 +229,13 @@ gvm extensions install PDK Ghidra_11.4_build
 gvm extensions uninstall FindCrypt
 # or
 gvm e rm FindCrypt
+
+# Scan the configured extensions directory and register found extensions
+gvm extensions scan
+gvm extensions scan Ghidra_11.4_build
 ```
+
+The `scan` command walks the directory set via `gvm prefs set ext_dir <path>` and discovers Ghidra extensions — both unpacked directories (containing `extension.properties`) and `.zip` files. Discovered extensions are registered for the specified (or default) Ghidra version.
 
 #### Available extensions
 
@@ -259,7 +278,7 @@ This file tracks installed versions, extensions, preferences, default version, a
 |---|---|---|---|
 | Install path | `%LOCALAPPDATA%\gvm\` | `~/.local/opt/gvm/` | `~/.local/opt/gvm/` |
 | Desktop launcher | -- | `.app` in `/Applications` | `.desktop` file |
-| Preferences backup/restore | Not supported | Supported | Supported |
+| Preferences backup/restore | Supported | Supported | Supported |
 | Ghidra runner | `ghidraRun.bat` | `ghidraRun` | `ghidraRun` |
 | PyGhidra runner | `support/pyghidraRun.bat` | `support/pyghidraRun` | `support/pyghidraRun` |
 
@@ -281,8 +300,8 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 | Extension management (install/uninstall/list) | Yes | Yes |
 | Built-in extension registry (27 extensions) | Yes | Yes |
 | Preferences (PyGhidra, UI scale) | Yes | Yes |
-| Preferences backup/restore (Linux/macOS) | Yes | Yes |
-| Auto-migrate preferences on version switch | Yes | Yes |
+| Preferences backup/restore | Yes (Linux/macOS only) | Yes (all platforms) |
+| Auto-migrate preferences on version switch | Yes (Linux/macOS only) | Yes (all platforms) |
 | Desktop notifications (optional) | Yes | Yes |
 | Linux `.desktop` launcher | Yes | Yes |
 | macOS `.app` launcher | Yes | Yes |
@@ -292,6 +311,9 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 | TOML-based cache | Yes | Yes |
 | Download progress bar | Yes | Yes |
 | Command aliases (`ls`, `i`, `r`, `del`, etc.) | Yes | Yes |
+| Local extensions directory + scan | No | Yes |
+| One-shot PyGhidra launch (`-py`) | No | Yes |
+| Custom install directory | No | Yes |
 | Windows desktop launcher creation | No | No |
 
 **Differences:**

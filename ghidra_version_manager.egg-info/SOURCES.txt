@@ -11,6 +11,7 @@ gvm/__init__.py
 gvm/cache.py
 gvm/extensions.py
 gvm/ghidra_props_parser.py
+gvm/gui.py
 gvm/install.py
 gvm/main.py
 gvm/prefs_backup/__init__.py

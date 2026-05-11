@@ -83,7 +83,7 @@ def do_update_check(cacher: Cacher, args) -> bool:
 
 
 def _allow_update_check(cmd: str) -> bool:
-    return cmd not in ("locate", "list", "settings", "prefs")
+    return cmd not in ("locate", "list", "settings", "prefs", "gui")
 
 
 def _backup_and_restore_prefs(
@@ -166,6 +166,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("locate", help="Get the path to a given Ghidra version")
     p.add_argument("tag", nargs="?", default=None)
 
+    sub.add_parser("gui", help="Launch the graphical interface")
+
     return parser
 
 
@@ -192,6 +194,11 @@ def main() -> None:
         path = default_path
 
     cmd = _COMMAND_ALIASES.get(args.command, args.command)
+
+    if cmd == "gui":
+        from gvm.gui import launch_gui
+        launch_gui()
+        return
 
     if _allow_update_check(cmd):
         now = datetime.now(timezone.utc)

@@ -23,9 +23,13 @@ dependencies = [
 
 [project.optional-dependencies]
 notifications = ["plyer>=2.1"]
+gui = ["customtkinter>=5.2"]
 
 [project.scripts]
 gvm = "gvm.main:main"
+
+[project.gui-scripts]
+gvm-gui = "gvm.gui:launch_gui"
 
 [project.urls]
 Python_Repository = "https://github.com/Fublah-Man/FM-Fork-ghidra-version-manager"

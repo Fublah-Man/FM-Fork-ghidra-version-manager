@@ -1,2 +1,5 @@
 [console_scripts]
 gvm = gvm.main:main
+
+[gui_scripts]
+gvm-gui = gvm.gui:launch_gui
