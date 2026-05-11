@@ -164,7 +164,7 @@ gvm prefs set install_dir default
 | `scale` | integer | Override the UI scale factor in `launch.properties` |
 | `install_dir` | path / `default` | Directory where Ghidra versions are installed. Set to `default` to reset |
 
-### Preferences backup and restore (Linux/macOS)
+### Preferences backup and restore
 
 ```shell
 # Back up preferences for the default version
@@ -243,7 +243,7 @@ This file tracks installed versions, extensions, preferences, default version, a
 |---|---|---|---|
 | Install path | `%LOCALAPPDATA%\gvm\` | `~/.local/opt/gvm/` | `~/.local/opt/gvm/` |
 | Desktop launcher | -- | `.app` in `/Applications` | `.desktop` file |
-| Preferences backup/restore | Not supported | Supported | Supported |
+| Preferences backup/restore | Supported | Supported | Supported |
 | Ghidra runner | `ghidraRun.bat` | `ghidraRun` | `ghidraRun` |
 | PyGhidra runner | `support/pyghidraRun.bat` | `support/pyghidraRun` | `support/pyghidraRun` |
 
@@ -265,8 +265,8 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 | Extension management (install/uninstall/list) | Yes | Yes |
 | Built-in extension registry (27 extensions) | Yes | Yes |
 | Preferences (PyGhidra, UI scale) | Yes | Yes |
-| Preferences backup/restore (Linux/macOS) | Yes | Yes |
-| Auto-migrate preferences on version switch | Yes | Yes |
+| Preferences backup/restore | Yes (Linux/macOS only) | Yes (all platforms) |
+| Auto-migrate preferences on version switch | Yes (Linux/macOS only) | Yes (all platforms) |
 | Desktop notifications (optional) | Yes | Yes |
 | Linux `.desktop` launcher | Yes | Yes |
 | macOS `.app` launcher | Yes | Yes |

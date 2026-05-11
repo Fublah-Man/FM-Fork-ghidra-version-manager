@@ -90,15 +90,18 @@ def _backup_and_restore_prefs(
     cacher: Cacher, old_tag: str, new_tag: str, install_fn
 ) -> None:
     restorer = None
-    if sys.platform != "win32" and old_tag and old_tag in cacher.cache.entries:
-        logger.info("Backing up config from last launched version %s", old_tag)
-        restorer = BackupGenerator.from_cached_version(
-            cacher.cache.entries[old_tag], old_tag
-        ).restorer()
+    if old_tag and old_tag in cacher.cache.entries:
+        try:
+            logger.info("Backing up config from last launched version %s", old_tag)
+            restorer = BackupGenerator.from_cached_version(
+                cacher.cache.entries[old_tag], old_tag
+            ).restorer()
+        except FileNotFoundError:
+            logger.debug("No preferences found for %s, skipping backup", old_tag)
 
     install_fn()
 
-    if sys.platform != "win32" and restorer and new_tag in cacher.cache.entries:
+    if restorer and new_tag in cacher.cache.entries:
         logger.info("Restoring config to %s", new_tag)
         restorer.restore_to_cached_version(cacher.cache.entries[new_tag])
 
@@ -351,18 +354,12 @@ def main() -> None:
         scmd = args.settings_cmd
         tag = _resolve_tag(args.tag, cacher)
         if scmd == "backup":
-            if sys.platform == "win32":
-                logger.error("This command is only supported on unix")
-                return
             if tag in cacher.cache.entries:
                 backup = BackupGenerator.from_cached_version(cacher.cache.entries[tag], tag)
                 Path(args.out).write_bytes(backup.backup_data)
             else:
                 logger.error("That version isn't installed")
         elif scmd == "restore":
-            if sys.platform == "win32":
-                logger.error("This command is only supported on unix")
-                return
             if tag in cacher.cache.entries:
                 BackupRestorer.from_path(Path(args.src)).restore_to_cached_version(
                     cacher.cache.entries[tag]

@@ -3,6 +3,7 @@ import zipfile
 from pathlib import Path
 
 from gvm.cache import CacheEntry
+from gvm.prefs_backup import ghidra_prefs_path
 from gvm.prefs_backup.gvm_config import GvmConfig
 
 
@@ -13,7 +14,7 @@ class BackupGenerator:
     @classmethod
     def from_cached_version(cls, cache_entry: CacheEntry, tag: str) -> "BackupGenerator":
         install_dir = Path(cache_entry.path).name
-        pref_path = Path.home() / ".config" / "ghidra" / install_dir / "preferences"
+        pref_path = ghidra_prefs_path(install_dir)
         prefs_data = pref_path.read_bytes()
 
         buf = io.BytesIO()

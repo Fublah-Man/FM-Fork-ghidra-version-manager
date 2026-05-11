@@ -1,35 +1,82 @@
-## 0.2.1
-- Launchers now proxy through gvm, so don't need to reinstall for new features
-- Support for launching pyghidra via `prefs set py3 true`
-- Update notifications when launching via desktop entries
+# Changelog
 
-## 0.2.2
-- Fixed error on first run
+All notable changes to this project are documented here.
 
-## 0.3.0
+This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D/ghidra-version-manager), originally written in Rust. The fork history begins at version 0.1.
+
+---
+
+## Python Fork (Fublah-Man)
+
+### 0.1 - 2026-05-11
+
+#### Forked and rewritten
+- Converted the entire codebase from Rust to Python. All functionality ported: version management, extension management, preferences, settings backup/restore, desktop launcher creation, and update notifications.
+- Removed all Rust source and build files (`src/`, `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `build.rs`).
+
+#### Fixed
+- `pyproject.toml` compatibility: replaced the non-existent `setuptools.backends.legacy:build` backend with `setuptools.build_meta`, fixing `pip install -e .` on modern setuptools.
+- PEP 621 compliance: moved `homepage`/`repository` to `[project.urls]` and fixed author fields to the standard `authors` list, resolving build validation errors.
+
+#### Added
+- **Custom install directory** (`gvm prefs set install_dir <path>`): Ghidra versions can now be installed to a user-specified directory instead of the platform default. Use `gvm prefs set install_dir default` to reset. The GVM cache file always remains at the platform default location.
+- **`-py` flag for `gvm run`**: launch Ghidra with PyGhidra for a single run without changing the persistent `py3` preference. Usage: `gvm run -py` or `gvm run -py <version>`.
+- **Windows settings backup/restore**: `gvm settings backup` and `gvm settings restore` now work on Windows (reading from `%APPDATA%\ghidra\<version>\preferences`). Previously these were blocked with "only supported on unix".
+- **Windows automatic preference migration**: switching Ghidra versions via `gvm run` or `gvm update` now automatically backs up and restores preferences on Windows, matching the existing Linux/macOS behavior.
+
+#### Changed
+- README rewritten with full usage walkthrough, extension registry listing, platform behavior table, and feature parity comparison with the original Rust version.
+- `.gitignore` updated to ignore `.claude/` directory.
+- Version reset to 0.1 to reflect a new fork with its own versioning.
+- Authors updated to list the fork maintainer (Fublah-Man) alongside the original author (CUB3D).
+- Project URLs updated to link both the Python fork and the original Rust repository.
+
+#### Improvements over the original Rust version
+
+| Feature | Rust (original) | Python (this fork) |
+|---|---|---|
+| Preferences backup/restore | Linux/macOS only | All platforms |
+| Auto-migrate prefs on version switch | Linux/macOS only | All platforms |
+| One-shot PyGhidra launch (`-py`) | Not available | Available |
+| Custom install directory | Not available | Available |
+| Install method | Requires Rust toolchain | `pip install` with Python 3.11+ |
+
+---
+
+## Original Rust Version (CUB3D)
+
+### 0.7.1
+- Fixed desktop entry to use PNG rather than ICO for icon, fixing corruption on Gnome
+
+### 0.7.0
+- New command `gvm locate` to get the path to a Ghidra install directory
+
+### 0.6.0
+- `gvm update` will now automatically backup and restore preferences from the old version to the new one
+  - This also applies to automatic updates from `gvm run`
+- Installation will no longer try and cache downloads for release builds, this prevents `Could not find EOCD` errors when resuming after an interrupted download
+
+### 0.5.0
+- Experimental unix-only support for backing up and restoring Ghidra preferences
+
+### 0.4.0
+- Support rewriting launch properties, prefs to set default ui scale `prefs set scale 2`
+
+### 0.3.2
+- Don't panic when the update check fails due to network issues
+
+### 0.3.1
+- Don't panic when deleting an extension you don't have installed
+
+### 0.3.0
 - Windows support
 - Fixed `run latest` not detecting an existing install
 - Now warns if you don't have java
 
-## 0.3.1
-- Don't panic when deleting an extension you don't have installed
+### 0.2.2
+- Fixed error on first run
 
-## 0.3.2
-- Don't panic when the update check fails due to network issues
-
-## 0.4.0
-- Support rewriting launch properties, prefs to set default ui scale `prefs set scale 2`
-
-## 0.5.0
-- Experimental unix-only support for backing up and restoring Ghidra preferences
-
-## 0.6.0
-- `gvm update` will now automatically backup and restore preferences from the old version to the new one
-- - This also applies to automatic updates from `gvm run`
-- Installation will no longer try and cache downloads for release builds, this prevents `Could not find EOCD` errors when resuming after an interrupted download
-
-## 0.7.0
-- New command `gvm locate` to get the path to a Ghidra install directory
-
-## 0.7.1
-- Fixed desktop entry to use PNG rather than ICO for icon, fixing corruption on Gnome
+### 0.2.1
+- Launchers now proxy through gvm, so don't need to reinstall for new features
+- Support for launching pyghidra via `prefs set py3 true`
+- Update notifications when launching via desktop entries
