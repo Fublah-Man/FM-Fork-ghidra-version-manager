@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghidra-version-manager"
-version = "0.7.1"
-description = "Ghidra Version Manager"
+version = "0.1"
+description = "Ghidra Version Manager - Python conversion"
 license = {text = "GPL-3.0-only"}
-authors = [{name = "CUB3D", email = "callumthom11@gmail.com"}]
+original author = [{name = "CUB3D", email = "callumthom11@gmail.com"}]
+author = [{name = "Fublah-Man", email = "fublahman@gmail.com"}]
 readme = "README.md"
 keywords = ["ghidra"]
 requires-python = ">=3.11"
@@ -25,8 +26,8 @@ notifications = ["plyer>=2.1"]
 gvm = "gvm.main:main"
 
 [project.urls]
-Homepage = "https://github.com/CUB3D/ghidra-version-manager"
-Repository = "https://github.com/CUB3D/ghidra-version-manager"
+Python Repository = "https://github.com/Fublah-Man/FM-Fork-ghidra-version-manager"
+Rust Repository = "https://github.com/CUB3D/ghidra-version-manager"
 
 [tool.setuptools.packages.find]
 where = ["."]
