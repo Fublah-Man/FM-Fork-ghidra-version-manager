@@ -8,7 +8,17 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 ## Python Fork (Fublah-Man)
 
-### 0.2 - 2026-05-11
+### 0.3 - 2026-05-14
+
+#### Changed
+- **GUI: Extensions tab reworked** — "Installed Extensions" now scans the selected Ghidra version's `Ghidra/Extensions/` directory on disk instead of reading from the GVM cache. "Available Extensions" now includes both the built-in registry and any local extensions discovered from the configured extensions directory (shown under a "Local Extensions" header). The "Scan Ext Dir" button refreshes the available list. Local extensions can be installed (copied into the Ghidra Extensions directory) with a single click.
+
+#### Improved
+- **GUI: Version row separators** — thin horizontal lines now visually separate each version listing for clearer readability.
+- **GUI: Version row layout** — release date and What's New toggle are positioned directly below the version name in a clean vertical stack.
+- **GUI: What's New scroll lock** — scrolling inside a What's New text box no longer scrolls the parent version list.
+
+### 0.2 - 2026-05-14
 
 #### Added
 - **GUI: Version sorting** — added a Sort dropdown to the Versions tab toolbar (next to Default). Options: "Newest" (default, by release date) and "Install Date" (installed versions first, most recently installed at top, using the install directory's filesystem timestamp).
@@ -32,6 +42,7 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 #### Added
 - **Graphical interface** (`gvm gui` or `gvm-gui`): a full CustomTkinter dark-mode GUI with three tabs — Versions (browse/install/run/uninstall, set default, check for updates), Extensions (install/remove from the built-in registry, scan local directory), and Settings (all preferences, directory config, backup/restore). Requires `pip install -e ".[gui]"`. All long-running operations (downloads, installs) run on background threads with status bar updates.
+- **Single-instance lock** for the GUI: prevents launching multiple instances. Uses PID-based lock file with stale lock recovery.
 - **Custom install directory** (`gvm prefs set install_dir <path>`): Ghidra versions can now be installed to a user-specified directory instead of the platform default. Use `gvm prefs set install_dir default` to reset. The GVM cache file always remains at the platform default location.
 - **Extensions directory and scan** (`gvm prefs set ext_dir <path>` + `gvm extensions scan`): Point GVM at a folder of local Ghidra extensions (unpacked directories with `extension.properties` or `.zip` files) and scan to register them for a Ghidra version. Use `gvm prefs set ext_dir default` to clear.
 - **`-py` flag for `gvm run`**: launch Ghidra with PyGhidra for a single run without changing the persistent `py3` preference. Usage: `gvm run -py` or `gvm run -py <version>`.
@@ -40,6 +51,7 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 #### Changed
 - README rewritten with full usage walkthrough, extension registry listing, platform behavior table, and feature parity comparison with the original Rust version.
+- Added Claude Code disclaimer to README.
 - `.gitignore` updated to ignore `.claude/` directory.
 - Version reset to 0.1 to reflect a new fork with its own versioning.
 - Authors updated to list the fork maintainer (Fublah-Man) alongside the original author (CUB3D).

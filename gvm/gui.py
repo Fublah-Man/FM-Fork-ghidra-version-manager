@@ -498,9 +498,11 @@ class GVMApp(ctk.CTk):
             w.destroy()
         self._ext_avail_widgets.clear()
 
-        for i, ext in enumerate(_load_all_extensions()):
+        idx = 0
+        # Built-in registry extensions
+        for ext in _load_all_extensions():
             row = ctk.CTkFrame(self._ext_avail_scroll)
-            row.grid(row=i, column=0, sticky="ew", pady=1, padx=2)
+            row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
 
             kind_short = "DL" if ext.get("kind", "DownloadOnly") == "DownloadOnly" else "Git"
@@ -516,8 +518,50 @@ class GVMApp(ctk.CTk):
             ).grid(row=0, column=2, padx=6, pady=3)
 
             self._ext_avail_widgets.append(row)
+            idx += 1
 
-    def _refresh_installed_exts(self) -> None:
+        # Local extensions from the configured extensions directory
+        ext_dir_str = self.cacher.cache.prefs.ext_dir
+        if ext_dir_str:
+            ext_dir = Path(ext_dir_str)
+            if ext_dir.is_dir():
+                local_exts = _scan_ext_dir(ext_dir)
+                if local_exts:
+                    # Separator + header
+                    sep = ctk.CTkFrame(self._ext_avail_scroll, height=1, fg_color=("gray70", "gray30"))
+                    sep.grid(row=idx, column=0, sticky="ew", padx=6, pady=(4, 2))
+                    self._ext_avail_widgets.append(sep)
+                    idx += 1
+
+                    hdr = ctk.CTkLabel(
+                        self._ext_avail_scroll, text="Local Extensions",
+                        font=ctk.CTkFont(size=12, weight="bold"), anchor="w",
+                    )
+                    hdr.grid(row=idx, column=0, sticky="w", padx=8, pady=(2, 2))
+                    self._ext_avail_widgets.append(hdr)
+                    idx += 1
+
+                    for ext in local_exts:
+                        row = ctk.CTkFrame(self._ext_avail_scroll)
+                        row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
+                        row.grid_columnconfigure(0, weight=1)
+
+                        ctk.CTkLabel(row, text=ext["name"], anchor="w", font=ctk.CTkFont(size=13)).grid(
+                            row=0, column=0, padx=8, pady=4, sticky="w"
+                        )
+                        ctk.CTkLabel(row, text="Local", text_color=_CLR_MUTED, font=ctk.CTkFont(size=11)).grid(
+                            row=0, column=1, padx=4
+                        )
+                        ctk.CTkButton(
+                            row, text="Install", width=70,
+                            command=lambda e=ext: self._install_local_extension(e),
+                        ).grid(row=0, column=2, padx=6, pady=3)
+
+                        self._ext_avail_widgets.append(row)
+                        idx += 1
+
+    def _refresh_installed_exts(self, _event=None) -> None:
+        """Scan the selected Ghidra version's Extensions/Ghidra directory."""
         for w in self._ext_inst_widgets:
             w.destroy()
         self._ext_inst_widgets.clear()
@@ -526,22 +570,33 @@ class GVMApp(ctk.CTk):
         if not ver or ver == "(none)" or ver not in self.cacher.cache.entries:
             return
 
-        exts = self.cacher.cache.entries[ver].extensions
-        for i, (slug, ext_entry) in enumerate(sorted(exts.items())):
+        entry = self.cacher.cache.entries[ver]
+        ext_ghidra_dir = Path(entry.path) / "Ghidra" / "Extensions"
+        if not ext_ghidra_dir.is_dir():
+            return
+
+        from gvm.extensions import _parse_extension_properties
+
+        idx = 0
+        for item in sorted(ext_ghidra_dir.iterdir()):
+            if not item.is_dir():
+                continue
+            props_file = item / "extension.properties"
+            if not props_file.is_file():
+                continue
+            props = _parse_extension_properties(props_file)
+            display_name = props.get("name", item.name)
+
             row = ctk.CTkFrame(self._ext_inst_scroll)
-            row.grid(row=i, column=0, sticky="ew", pady=1, padx=2)
+            row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
 
-            display_name = slug.replace("local-", "").replace("-", " ").title()
             ctk.CTkLabel(row, text=display_name, anchor="w", font=ctk.CTkFont(size=13)).grid(
                 row=0, column=0, padx=8, pady=4, sticky="w"
             )
-            ctk.CTkButton(
-                row, text="Remove", width=70, fg_color=_CLR_DANGER, hover_color="#c9302c",
-                command=lambda s=slug: self._uninstall_extension(s),
-            ).grid(row=0, column=1, padx=6, pady=3)
 
             self._ext_inst_widgets.append(row)
+            idx += 1
 
     # ------------------------------------------------------------------
     # Settings tab
@@ -944,49 +999,48 @@ class GVMApp(ctk.CTk):
 
         self._task_queue.put(f"Removed {slug}")
 
-    def _scan_extensions(self) -> None:
+    def _install_local_extension(self, ext: dict) -> None:
+        """Copy a local extension into the selected Ghidra version's Extensions dir."""
         ver = self._ext_ver_var.get()
         if not ver or ver == "(none)":
             self._set_status("Select a Ghidra version first")
             return
-        self._run_threaded(self._do_scan_extensions, ver)
+        self._run_threaded(self._do_install_local_extension, ext, ver)
 
-    def _do_scan_extensions(self, ghidra_version: str) -> None:
-        ext_dir_str = self.cacher.cache.prefs.ext_dir
-        if not ext_dir_str:
-            self._task_queue.put("No extensions directory set — configure in Settings tab")
-            return
-
-        ext_dir = Path(ext_dir_str)
-        if not ext_dir.is_dir():
-            self._task_queue.put(f"Directory not found: {ext_dir}")
-            return
-
-        self._task_queue.put(f"Scanning {ext_dir}...")
-        from gvm.cache import ExtEntry
-        found = _scan_ext_dir(ext_dir)
-
-        if not found:
-            self._task_queue.put("No extensions found")
-            return
-
-        ghidra_entry = self.cacher.cache.entries.get(ghidra_version)
-        if ghidra_entry is None:
+    def _do_install_local_extension(self, ext: dict, ghidra_version: str) -> None:
+        ghidra_ent = self.cacher.cache.entries.get(ghidra_version)
+        if ghidra_ent is None:
             self._task_queue.put(f"Version {ghidra_version} not installed")
             return
 
-        added = 0
-        for ext in found:
-            slug = f"local-{ext['name'].lower().replace(' ', '-')}"
-            if slug not in ghidra_entry.extensions:
-                ghidra_entry.extensions[slug] = ExtEntry(files=[ext["path"]])
-                added += 1
+        src = Path(ext["path"])
+        dest_dir = Path(ghidra_ent.path) / "Ghidra" / "Extensions"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
 
-        if added:
-            self.cacher.save()
-            self._task_queue.put(f"Added {added} extension(s)")
+        if dest.exists():
+            self._task_queue.put(f"{ext['name']} is already installed")
+            return
+
+        self._task_queue.put(f"Installing local extension {ext['name']}...")
+        if src.is_dir():
+            shutil.copytree(str(src), str(dest))
         else:
-            self._task_queue.put("All extensions already registered")
+            shutil.copy2(str(src), str(dest))
+        self._task_queue.put(f"Installed {ext['name']}")
+
+    def _scan_extensions(self) -> None:
+        """Rescan the extensions directory and refresh the Available list."""
+        ext_dir_str = self.cacher.cache.prefs.ext_dir
+        if not ext_dir_str:
+            self._set_status("No extensions directory set — configure in Settings tab")
+            return
+        ext_dir = Path(ext_dir_str)
+        if not ext_dir.is_dir():
+            self._set_status(f"Directory not found: {ext_dir}")
+            return
+        self._rebuild_avail_exts()
+        self._set_status(f"Rescanned {ext_dir}")
 
     # ------------------------------------------------------------------
     # Settings operations
