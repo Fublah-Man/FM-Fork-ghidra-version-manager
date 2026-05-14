@@ -2,9 +2,11 @@
 
 import argparse
 import atexit
+import html as html_mod
 import logging
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -69,6 +71,9 @@ class GVMApp(ctk.CTk):
         self._releases: list[dict] = []
         self._show_all_versions = False
         self._INITIAL_VERSION_COUNT = 4
+        self._pending_restart = False
+        self._whats_new_cache: dict[str, str | None] = {}
+        self._expanded_tags: set[str] = set()
 
         # --- Layout ---
         self.grid_rowconfigure(0, weight=1)
@@ -122,16 +127,26 @@ class GVMApp(ctk.CTk):
         self._lbl_latest = ctk.CTkLabel(top, text="", font=ctk.CTkFont(size=13))
         self._lbl_latest.grid(row=0, column=2, sticky="w", padx=6)
 
-        # Default selector
-        default_frame = ctk.CTkFrame(top, fg_color="transparent")
-        default_frame.grid(row=0, column=3, sticky="e")
-        ctk.CTkLabel(default_frame, text="Default:", font=ctk.CTkFont(size=13)).pack(side="left", padx=(0, 4))
+        # Default selector + Sort selector
+        right_frame = ctk.CTkFrame(top, fg_color="transparent")
+        right_frame.grid(row=0, column=3, sticky="e")
+
+        ctk.CTkLabel(right_frame, text="Default:", font=ctk.CTkFont(size=13)).pack(side="left", padx=(0, 4))
         self._default_var = ctk.StringVar(value=self.cacher.cache.default)
         self._opt_default = ctk.CTkOptionMenu(
-            default_frame, variable=self._default_var, values=["latest"], width=200,
+            right_frame, variable=self._default_var, values=["latest"], width=150,
             command=self._on_set_default,
         )
         self._opt_default.pack(side="left")
+
+        ctk.CTkLabel(right_frame, text="Sort:", font=ctk.CTkFont(size=13)).pack(side="left", padx=(12, 4))
+        self._sort_var = ctk.StringVar(value="Newest")
+        self._opt_sort = ctk.CTkOptionMenu(
+            right_frame, variable=self._sort_var,
+            values=["Newest", "Install Date"],
+            width=120, command=lambda _: self._rebuild_version_rows(),
+        )
+        self._opt_sort.pack(side="left")
 
         # Scrollable version list
         self._ver_scroll = ctk.CTkScrollableFrame(tab)
@@ -157,48 +172,57 @@ class GVMApp(ctk.CTk):
         if self.cacher.cache.latest_known:
             self._lbl_latest.configure(text=f"Latest: {self.cacher.cache.latest_known}")
 
+        # Sort releases
+        sorted_releases = list(self._releases)
+        sort_mode = self._sort_var.get()
+        if sort_mode == "Install Date":
+            sorted_releases = self._sort_by_install_date(sorted_releases)
+        # "Newest" is the default order from the GitHub API — no re-sort needed.
+
         # Lazy-load: show only the first N releases unless expanded
         if self._show_all_versions:
-            visible = self._releases
+            visible = sorted_releases
         else:
-            visible = self._releases[: self._INITIAL_VERSION_COUNT]
+            visible = sorted_releases[: self._INITIAL_VERSION_COUNT]
 
         for i, rel in enumerate(visible):
             tag = rel["tag_name"]
             is_installed = tag in installed
             is_default = tag == default_tag
+            is_expanded = tag in self._expanded_tags
 
+            grid_row = i * 2
             row = ctk.CTkFrame(self._ver_scroll)
-            row.grid(row=i, column=0, sticky="ew", pady=(0, 1), padx=2)
+            row.grid(row=grid_row, column=0, sticky="ew", pady=(0, 2), padx=2)
             row.grid_columnconfigure(0, weight=1)
 
-            # --- Top section: tag + badges + buttons in one line ---
-            top = ctk.CTkFrame(row, fg_color="transparent")
-            top.grid(row=0, column=0, sticky="ew")
-            top.grid_columnconfigure(1, weight=1)
+            # --- Header row: left info + right buttons ---
+            header = ctk.CTkFrame(row, fg_color="transparent")
+            header.grid(row=0, column=0, sticky="ew")
+            header.grid_columnconfigure(0, weight=1)
 
-            # Tag name
+            # Left side: tag name + badges inline
+            left = ctk.CTkFrame(header, fg_color="transparent")
+            left.grid(row=0, column=0, sticky="w")
+
             ctk.CTkLabel(
-                top, text=tag, font=ctk.CTkFont(size=13, weight="bold"), anchor="w",
-            ).grid(row=0, column=0, padx=(8, 4), pady=(4, 0), sticky="w")
+                left, text=tag, font=ctk.CTkFont(size=13, weight="bold"), anchor="w",
+            ).pack(side="left", padx=(8, 4), pady=(4, 0))
 
-            # Badges
-            badge_frame = ctk.CTkFrame(top, fg_color="transparent")
-            badge_frame.grid(row=0, column=1, sticky="w")
             if is_installed:
                 ctk.CTkLabel(
-                    badge_frame, text="installed", text_color=_CLR_INSTALLED,
+                    left, text="installed", text_color=_CLR_INSTALLED,
                     font=ctk.CTkFont(size=11),
-                ).pack(side="left", padx=3)
+                ).pack(side="left", padx=3, pady=(4, 0))
             if is_default:
                 ctk.CTkLabel(
-                    badge_frame, text="default", text_color=_CLR_DEFAULT,
+                    left, text="default", text_color=_CLR_DEFAULT,
                     font=ctk.CTkFont(size=11),
-                ).pack(side="left", padx=3)
+                ).pack(side="left", padx=3, pady=(4, 0))
 
-            # Buttons
-            btn_frame = ctk.CTkFrame(top, fg_color="transparent")
-            btn_frame.grid(row=0, column=2, padx=4, pady=2)
+            # Right side: action buttons
+            btn_frame = ctk.CTkFrame(header, fg_color="transparent")
+            btn_frame.grid(row=0, column=1, padx=4, pady=2, sticky="e")
 
             if is_installed:
                 ctk.CTkButton(
@@ -220,7 +244,7 @@ class GVMApp(ctk.CTk):
                     command=lambda t=tag: self._install_version(t),
                 ).pack(side="left", padx=1)
 
-            # --- Subtitle: release name + date ---
+            # --- Subtitle: release name + date (directly below tag) ---
             subtitle_parts: list[str] = []
             release_name = rel.get("name", "")
             if release_name and release_name != tag:
@@ -236,26 +260,181 @@ class GVMApp(ctk.CTk):
                 ctk.CTkLabel(
                     row, text="  •  ".join(subtitle_parts),
                     font=ctk.CTkFont(size=11), text_color=_CLR_MUTED, anchor="w",
-                ).grid(row=1, column=0, padx=(10, 8), pady=(0, 4), sticky="w")
+                ).grid(row=1, column=0, padx=(10, 8), pady=0, sticky="w")
+
+            # --- What's New toggle (directly below subtitle) ---
+            arrow_text = "▼" if is_expanded else "▶"
+            toggle_btn = ctk.CTkButton(
+                row, text=f"{arrow_text}  What's New", width=120, height=22,
+                font=ctk.CTkFont(size=11), fg_color="transparent",
+                text_color=_CLR_MUTED, hover_color=("gray75", "gray25"),
+                anchor="w",
+                command=lambda t=tag: self._toggle_whats_new(t),
+            )
+            toggle_btn.grid(row=2, column=0, padx=(6, 8), pady=(0, 2), sticky="w")
+
+            # --- Expanded What's New content ---
+            if is_expanded:
+                content = self._whats_new_cache.get(tag)
+                if content is None:
+                    lbl = ctk.CTkLabel(
+                        row, text="Loading...",
+                        font=ctk.CTkFont(size=11), text_color=_CLR_MUTED, anchor="nw",
+                    )
+                    lbl.grid(row=3, column=0, padx=(16, 8), pady=(0, 6), sticky="ew")
+                elif content == "":
+                    lbl = ctk.CTkLabel(
+                        row, text="What's New not available for this version.",
+                        font=ctk.CTkFont(size=11), text_color=_CLR_MUTED, anchor="nw",
+                    )
+                    lbl.grid(row=3, column=0, padx=(16, 8), pady=(0, 6), sticky="ew")
+                else:
+                    text_box = ctk.CTkTextbox(
+                        row, wrap="word", font=ctk.CTkFont(size=12),
+                        height=250, activate_scrollbars=True,
+                    )
+                    text_box.grid(row=3, column=0, padx=(10, 8), pady=(0, 6), sticky="ew")
+                    text_box.insert("1.0", content)
+                    text_box.configure(state="disabled")
+                    # Prevent scroll events from bubbling to the parent list
+                    self._lock_scroll(text_box)
+
+            # --- Separator line between rows ---
+            if i < len(visible) - 1:
+                sep = ctk.CTkFrame(self._ver_scroll, height=1, fg_color=("gray70", "gray30"))
+                sep.grid(row=grid_row + 1, column=0, sticky="ew", padx=6, pady=(2, 2))
+                self._ver_widgets.append(sep)
 
             self._ver_widgets.append(row)
 
         # "Show All Releases" button when there are hidden releases
-        remaining = len(self._releases) - len(visible)
+        remaining = len(sorted_releases) - len(visible)
         if remaining > 0:
+            next_grid = len(visible) * 2
             btn_more = ctk.CTkButton(
                 self._ver_scroll,
                 text=f"Show All Releases ({remaining} more)",
                 width=260, height=30,
                 command=self._expand_all_versions,
             )
-            btn_more.grid(row=len(visible), column=0, pady=(6, 4))
+            btn_more.grid(row=next_grid, column=0, pady=(6, 4))
             self._ver_widgets.append(btn_more)
 
     def _expand_all_versions(self) -> None:
         """Expand the version list to show all releases."""
         self._show_all_versions = True
         self._rebuild_version_rows()
+
+    def _sort_by_install_date(self, releases: list[dict]) -> list[dict]:
+        """Sort releases so installed versions come first (most recently installed
+        at top), followed by uninstalled versions in their original order."""
+        installed_rels: list[tuple[float, dict]] = []
+        uninstalled_rels: list[dict] = []
+
+        for rel in releases:
+            tag = rel["tag_name"]
+            entry = self.cacher.cache.entries.get(tag)
+            if entry and entry.path:
+                try:
+                    mtime = Path(entry.path).stat().st_mtime
+                except OSError:
+                    mtime = 0.0
+                installed_rels.append((mtime, rel))
+            else:
+                uninstalled_rels.append(rel)
+
+        # Most recently installed first
+        installed_rels.sort(key=lambda x: x[0], reverse=True)
+        return [rel for _, rel in installed_rels] + uninstalled_rels
+
+    @staticmethod
+    def _lock_scroll(textbox: ctk.CTkTextbox) -> None:
+        """Bind mouse-wheel events on *textbox* so they scroll the textbox
+        and never propagate up to the parent scrollable frame."""
+        inner = textbox._textbox  # underlying tk.Text widget
+
+        def _on_wheel(event):
+            # Scroll the textbox, then consume the event
+            inner.yview_scroll(-1 * (event.delta // 120), "units")
+            return "break"
+
+        inner.bind("<MouseWheel>", _on_wheel)        # Windows / macOS
+        inner.bind("<Button-4>", lambda e: (inner.yview_scroll(-3, "units"), "break")[-1])  # Linux up
+        inner.bind("<Button-5>", lambda e: (inner.yview_scroll(3, "units"), "break")[-1])   # Linux down
+
+    def _toggle_whats_new(self, tag: str) -> None:
+        """Toggle the What's New panel for a version."""
+        if tag in self._expanded_tags:
+            self._expanded_tags.discard(tag)
+            self._rebuild_version_rows()
+        else:
+            self._expanded_tags.add(tag)
+            if tag not in self._whats_new_cache:
+                # Show "Loading..." immediately, then fetch in background
+                self._rebuild_version_rows()
+                threading.Thread(
+                    target=self._fetch_whats_new, args=(tag,), daemon=True,
+                ).start()
+            else:
+                self._rebuild_version_rows()
+
+    def _fetch_whats_new(self, tag: str) -> None:
+        """Fetch the What's New content for a Ghidra version from GitHub."""
+        import requests
+
+        base = (
+            "https://raw.githubusercontent.com/NationalSecurityAgency/ghidra/"
+            f"{tag}/Ghidra/Configurations/Public_Release/src/global/docs/WhatsNew"
+        )
+        content = ""
+        try:
+            # Try .md first (Ghidra 11.3+), then .html (older versions)
+            for ext in (".md", ".html"):
+                resp = requests.get(
+                    base + ext,
+                    headers={"User-Agent": "gvm"},
+                    timeout=20,
+                )
+                if resp.status_code == 200:
+                    raw = resp.text
+                    if ext == ".html":
+                        raw = self._html_to_plain(raw)
+                    content = self._extract_whats_new_section(raw, tag)
+                    break
+        except Exception as e:
+            logger.debug("Failed to fetch WhatsNew for %s: %s", tag, e)
+
+        self._whats_new_cache[tag] = content
+        # Schedule a UI rebuild on the main thread
+        self.after(0, self._rebuild_version_rows)
+
+    @staticmethod
+    def _extract_whats_new_section(text: str, tag: str) -> str:
+        """Extract the 'What's New in Ghidra X.Y' section from the full text."""
+        lines = text.splitlines()
+        start = None
+        for i, line in enumerate(lines):
+            if re.match(r"^#+ What.?s New", line, re.IGNORECASE):
+                start = i
+                break
+        if start is not None:
+            return "\n".join(lines[start:]).strip()
+        # Fallback: return full text (trimmed)
+        return text.strip()
+
+    @staticmethod
+    def _html_to_plain(html_text: str) -> str:
+        """Convert simple HTML to readable plain text."""
+        text = re.sub(r"<br\s*/?>", "\n", html_text, flags=re.IGNORECASE)
+        text = re.sub(r"<li[^>]*>", "  - ", text, flags=re.IGNORECASE)
+        text = re.sub(r"<h[1-6][^>]*>", "\n## ", text, flags=re.IGNORECASE)
+        text = re.sub(r"</h[1-6]>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"<p[^>]*>", "\n", text, flags=re.IGNORECASE)
+        text = re.sub(r"<[^>]+>", "", text)
+        text = html_mod.unescape(text)
+        # Collapse excessive blank lines
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
 
     # ------------------------------------------------------------------
     # Extensions tab
@@ -481,10 +660,19 @@ class GVMApp(ctk.CTk):
                 if msg is None:
                     # Task finished
                     self._busy = False
+                    if self._pending_restart:
+                        self._pending_restart = False
+                        self._restart_gui()
+                        return
                     self.cacher = Cacher.load(self._default_path / "cache.toml")
                     self._rebuild_version_rows()
                     self._refresh_ext_tab()
                     self._refresh_backup_versions()
+                elif isinstance(msg, tuple) and msg[0] == "__update_available__":
+                    self._busy = False
+                    tag = msg[1]
+                    self._set_status(f"New version available: {tag}")
+                    self._prompt_update(tag)
                 else:
                     self._set_status(msg)
         except queue.Empty:
@@ -542,15 +730,86 @@ class GVMApp(ctk.CTk):
         self._run_threaded(self._do_check_update)
 
     def _do_check_update(self) -> None:
-        self._task_queue.put("Checking for updates...")
+        """Check whether a newer version of GVM itself is available upstream."""
+        self._task_queue.put("Checking for GVM updates...")
+        repo_dir = Path(__file__).resolve().parent.parent
         try:
-            new = update_latest_version(self.cacher)
-            if new:
-                self._task_queue.put(f"New version available: {self.cacher.cache.latest_known}")
+            # Fetch latest commits from the remote
+            subprocess.run(
+                ["git", "fetch"],
+                cwd=repo_dir, capture_output=True, timeout=30,
+            )
+            # Compare local HEAD to upstream tracking branch
+            result = subprocess.run(
+                ["git", "status", "-uno", "--porcelain=v2", "--branch"],
+                cwd=repo_dir, capture_output=True, text=True, timeout=10,
+            )
+            behind = 0
+            for line in result.stdout.splitlines():
+                if line.startswith("# branch.ab"):
+                    # Format: # branch.ab +<ahead> -<behind>
+                    parts = line.split()
+                    for p in parts:
+                        if p.startswith("-"):
+                            try:
+                                behind = abs(int(p))
+                            except ValueError:
+                                pass
+                    break
+
+            if behind > 0:
+                self._task_queue.put(("__update_available__", f"{behind} commit(s) behind"))
+                return
             else:
-                self._task_queue.put("You have the latest version")
+                self._task_queue.put("GVM is up to date")
+        except FileNotFoundError:
+            self._task_queue.put("git not found — cannot check for GVM updates")
         except Exception as e:
             self._task_queue.put(f"Update check failed: {e}")
+
+    def _prompt_update(self, info: str) -> None:
+        """Show a dialog asking the user whether to update GVM."""
+        answer = messagebox.askyesno(
+            "GVM Update Available",
+            f"Your GVM installation is {info}.\n\nWould you like to update?",
+        )
+        if answer:
+            self._run_threaded(self._do_update_and_restart)
+        else:
+            self._set_status("GVM update skipped")
+
+    def _do_update_and_restart(self) -> None:
+        """Pull the latest GVM source, reinstall the package, then restart."""
+        repo_dir = Path(__file__).resolve().parent.parent
+
+        self._task_queue.put("Pulling latest GVM changes...")
+        pull = subprocess.run(
+            ["git", "pull"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=60,
+        )
+        if pull.returncode != 0:
+            self._task_queue.put(f"git pull failed: {pull.stderr.strip()}")
+            return
+
+        self._task_queue.put("Reinstalling GVM package...")
+        pip = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-e", ".[gui]"],
+            cwd=repo_dir, capture_output=True, text=True, timeout=120,
+        )
+        if pip.returncode != 0:
+            self._task_queue.put(f"pip install failed: {pip.stderr.strip()}")
+            return
+
+        self._task_queue.put("Updated — restarting...")
+        # _thread_wrapper will append None next (clears _busy), then
+        # the poll handler sees _pending_restart and restarts the GUI.
+        self._pending_restart = True
+
+    def _restart_gui(self) -> None:
+        """Close the current window and re-launch the GUI in a new process."""
+        _release_lock()
+        self.destroy()
+        subprocess.Popen([sys.executable, "-m", "gvm.gui"])
 
     def _install_version(self, tag: str) -> None:
         self._run_threaded(self._do_install_version, tag)

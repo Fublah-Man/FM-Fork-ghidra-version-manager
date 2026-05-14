@@ -10,10 +10,15 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 ### 0.2 - 2026-05-11
 
+#### Added
+- **GUI: Version sorting** — added a Sort dropdown to the Versions tab toolbar (next to Default). Options: "Newest" (default, by release date) and "Install Date" (installed versions first, most recently installed at top, using the install directory's filesystem timestamp).
+- **GUI: GVM self-update** — "Check for Updates" now checks for updates to GVM itself (via `git fetch` against the upstream repo), not Ghidra releases. When commits are available, a dialog asks "Would you like to update?" — selecting Yes runs `git pull` and `pip install -e .[gui]`, then automatically restarts the GUI. The "Refresh" button continues to refresh the Ghidra release list as before.
+- **GUI: What's New panel** — each version listing now has a collapsible "▶ What's New" toggle. Clicking it fetches the WhatsNew document from the Ghidra GitHub repository (`.md` for 11.3+, `.html` with tag-stripping for older versions), caches the result, and displays it in a scrollable text box. Click again to collapse.
+
 #### Improved
 - **GUI: Lazy-load versions** — the Versions tab now shows only the 4 most recent releases on load. A "Show All Releases (X more)" button at the bottom expands the full list on demand, reducing initial clutter.
 - **GUI: Compact version rows** — each row now displays the release name (e.g. "Ghidra 11.4") and publish date as a muted subtitle beneath the tag, replacing the previous empty-space layout. Buttons and badges are tighter with reduced padding and smaller heights.
-- **GUI: Tighter layout** — raised the tab bar, reduced row/button/status-bar padding throughout for a cleaner, denser interface.
+- **GUI: Tighter layout** — raised the tab bar, reduced row/button/status-bar padding throughout for a cleaner, denser interface. Shortened the Default version dropdown width.
 
 ### 0.1 - 2026-05-11
 
