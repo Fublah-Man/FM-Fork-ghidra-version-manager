@@ -310,22 +310,8 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     # project's todo); `launcher` stays None and that's recorded in the cache.
 
     logger.info("📜 Regenerating config")
-    # Patch launch.properties to apply the UI-scale override. We keep a one-time
-    # backup of the original so the rewrite is based on pristine values rather
-    # than re-applying on top of a previous edit.
-    props_path = dir_path / "support" / "launch.properties"
-    props_backup_path = dir_path / "support" / "launch.properties.backup"
-    shutil.copy2(props_path, props_backup_path)
-
-    props = GhidraPropsFile.from_path(props_backup_path)
-    vmargs = props.get_by_key("VMARGS_LINUX")
-    if vmargs is None:
-        raise RuntimeError("Can't find VMARGS_LINUX prop")
-    # Drop any pre-existing uiScale arg, then append our configured value.
-    vmargs = [v for v in vmargs if not v.startswith("-Dsun.java2d.uiScale=")]
-    vmargs.append(f"-Dsun.java2d.uiScale={cacher.cache.prefs.ui_scale_override}")
-    props.put("VMARGS_LINUX", vmargs)
-    props.save_to_file(props_path)
+    # Bake the configured UI-scale override into this install's launch.properties.
+    apply_ui_scale(dir_path, cacher.cache.prefs.ui_scale_override)
 
     # Record the freshly installed version (and its launcher) in the cache.
     cacher.cache.entries[tag] = CacheEntry(
@@ -337,6 +323,35 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
 
     # The extracted directory is what we keep; the zip is no longer needed.
     dl_path.unlink()
+
+
+def apply_ui_scale(install_dir: Path, scale: int) -> None:
+    """Write the Java2D UI-scale override into an install's launch.properties.
+
+    Ghidra reads its JVM args from ``support/launch.properties``. We keep a
+    one-time pristine backup (``launch.properties.backup``) and always rebuild
+    from it, so repeatedly changing the scale never stacks duplicate args.
+
+    This is called both at install time and by the GUI when the user changes the
+    scale and chooses to re-apply it to already-installed versions.
+    """
+    props_path = install_dir / "support" / "launch.properties"
+    props_backup_path = install_dir / "support" / "launch.properties.backup"
+
+    # Create the pristine backup the first time only; thereafter it's our source
+    # of truth so edits are idempotent.
+    if not props_backup_path.exists():
+        shutil.copy2(props_path, props_backup_path)
+
+    props = GhidraPropsFile.from_path(props_backup_path)
+    vmargs = props.get_by_key("VMARGS_LINUX")
+    if vmargs is None:
+        raise RuntimeError("Can't find VMARGS_LINUX prop")
+    # Drop any pre-existing uiScale arg, then append the requested value.
+    vmargs = [v for v in vmargs if not v.startswith("-Dsun.java2d.uiScale=")]
+    vmargs.append(f"-Dsun.java2d.uiScale={scale}")
+    props.put("VMARGS_LINUX", vmargs)
+    props.save_to_file(props_path)
 
 
 def _ico_to_png(ico_path: Path, png_path: Path) -> None:

@@ -91,6 +91,10 @@ class Prefs:
     install_dir: str = ""
     # Directory scanned for locally-supplied extensions. Empty means "not set".
     ext_dir: str = ""
+    # When True (the default), launching Ghidra from the GUI spawns it as a child
+    # process so the GUI window stays open. When False the GUI is replaced/closed
+    # by the launch (the older behaviour). Only consulted by the GUI.
+    keep_gui_open: bool = True
 
     def to_dict(self) -> dict:
         # Always persist the two scalar settings; only persist the directory
@@ -100,6 +104,9 @@ class Prefs:
             d["install_dir"] = self.install_dir
         if self.ext_dir:
             d["ext_dir"] = self.ext_dir
+        # Only written when turned off, so the default-True case stays implicit.
+        if not self.keep_gui_open:
+            d["keep_gui_open"] = self.keep_gui_open
         return d
 
     @classmethod
@@ -110,6 +117,7 @@ class Prefs:
             ui_scale_override=d.get("ui_scale_override", 1),
             install_dir=d.get("install_dir", ""),
             ext_dir=d.get("ext_dir", ""),
+            keep_gui_open=d.get("keep_gui_open", True),
         )
 
 

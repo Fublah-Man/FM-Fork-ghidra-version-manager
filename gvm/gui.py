@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -87,8 +88,14 @@ class GVMApp(ctk.CTk):
         self._task_queue: queue.Queue[str | None] = queue.Queue()
         self._busy = False
         self._releases: list[dict] = []
-        self._show_all_versions = False
-        self._INITIAL_VERSION_COUNT = 4
+        # Incremental release fetching: we start with the 5 newest releases and
+        # the "Load more" button pulls additional pages on demand. _more_page is
+        # the next GitHub page to request (page size _MORE_PAGE_SIZE); _has_more
+        # tracks whether the last page came back full (i.e. more may exist).
+        self._INITIAL_VERSION_COUNT = 5
+        self._MORE_PAGE_SIZE = 50
+        self._more_page = 1
+        self._has_more = True
         self._pending_restart = False
         self._whats_new_cache: dict[str, str | None] = {}
         self._expanded_tags: set[str] = set()
@@ -139,7 +146,9 @@ class GVMApp(ctk.CTk):
         self._btn_refresh = ctk.CTkButton(top, text="Refresh", width=100, command=self._refresh_versions)
         self._btn_refresh.grid(row=0, column=0, padx=(0, 6))
 
-        self._btn_check_update = ctk.CTkButton(top, text="Check for Updates", width=140, command=self._check_update)
+        # NOTE: this checks for updates to GVM itself (via git), not to Ghidra.
+        # New Ghidra releases are picked up by "Refresh".
+        self._btn_check_update = ctk.CTkButton(top, text="Check GVM Updates", width=150, command=self._check_update)
         self._btn_check_update.grid(row=0, column=1, padx=(0, 6))
 
         self._lbl_latest = ctk.CTkLabel(top, text="", font=ctk.CTkFont(size=13))
@@ -197,11 +206,9 @@ class GVMApp(ctk.CTk):
             sorted_releases = self._sort_by_install_date(sorted_releases)
         # "Newest" is the default order from the GitHub API — no re-sort needed.
 
-        # Lazy-load: show only the first N releases unless expanded
-        if self._show_all_versions:
-            visible = sorted_releases
-        else:
-            visible = sorted_releases[: self._INITIAL_VERSION_COUNT]
+        # We display everything we've fetched so far; fetching itself is paged
+        # (5 initially, then +50 per "Load more"), so the list grows on demand.
+        visible = sorted_releases
 
         for i, rel in enumerate(visible):
             tag = rel["tag_name"]
@@ -325,23 +332,50 @@ class GVMApp(ctk.CTk):
 
             self._ver_widgets.append(row)
 
-        # "Show All Releases" button when there are hidden releases
-        remaining = len(sorted_releases) - len(visible)
-        if remaining > 0:
+        # "Load more" button: fetches the next page of releases from GitHub while
+        # the previous page came back full (so more likely exist). Disabled while
+        # a fetch is in flight.
+        if self._has_more:
             next_grid = len(visible) * 2
             btn_more = ctk.CTkButton(
                 self._ver_scroll,
-                text=f"Show All Releases ({remaining} more)",
+                text=f"Load {self._MORE_PAGE_SIZE} more",
                 width=260, height=30,
-                command=self._expand_all_versions,
+                command=self._load_more_versions,
             )
             btn_more.grid(row=next_grid, column=0, pady=(6, 4))
             self._ver_widgets.append(btn_more)
 
-    def _expand_all_versions(self) -> None:
-        """Expand the version list to show all releases."""
-        self._show_all_versions = True
-        self._rebuild_version_rows()
+    def _load_more_versions(self) -> None:
+        """Fetch the next page of releases and append them to the list."""
+        self._run_threaded(self._do_load_more)
+
+    def _do_load_more(self) -> None:
+        import requests
+        self._task_queue.put("Loading more releases...")
+        try:
+            resp = requests.get(
+                "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
+                params={"per_page": self._MORE_PAGE_SIZE, "page": self._more_page},
+                headers={"User-Agent": "gvm"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+        except Exception as e:
+            self._task_queue.put(f"Failed to load more releases: {e}")
+            return
+
+        # Append only releases we don't already have (the first page of size 50
+        # overlaps the initial 5), keeping the combined list de-duplicated.
+        have = {r["tag_name"] for r in self._releases}
+        added = [r for r in batch if r["tag_name"] not in have]
+        self._releases.extend(added)
+
+        # Advance the page cursor; if this page wasn't full there's nothing more.
+        self._more_page += 1
+        self._has_more = len(batch) >= self._MORE_PAGE_SIZE
+        self._task_queue.put(f"Loaded {len(self._releases)} releases")
 
     def _sort_by_install_date(self, releases: list[dict]) -> list[dict]:
         """Sort releases so installed versions come first (most recently installed
@@ -473,6 +507,7 @@ class GVMApp(ctk.CTk):
                                               command=lambda _: self._refresh_installed_exts())
         self._opt_ext_ver.pack(side="left")
         ctk.CTkButton(top, text="Scan Ext Dir", width=120, command=self._scan_extensions).pack(side="right")
+        ctk.CTkButton(top, text="Add from git url", width=140, command=self._add_extension_dialog).pack(side="right", padx=(0, 6))
 
         # Left: available extensions
         left_label = ctk.CTkLabel(tab, text="Available Extensions", font=ctk.CTkFont(size=14, weight="bold"))
@@ -516,15 +551,18 @@ class GVMApp(ctk.CTk):
             w.destroy()
         self._ext_avail_widgets.clear()
 
+        from gvm.extensions import repo_url_for
+
         idx = 0
-        # Built-in registry extensions
+        # Built-in + user-added registry extensions
         for ext in _load_all_extensions():
             row = ctk.CTkFrame(self._ext_avail_scroll)
             row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
 
             kind_short = "DL" if ext.get("kind", "DownloadOnly") == "DownloadOnly" else "Git"
-            ctk.CTkLabel(row, text=ext["name"], anchor="w", font=ctk.CTkFont(size=13)).grid(
+            # The name is a clickable link that opens the repo in a browser.
+            self._name_widget(row, ext["name"], repo_url_for(ext)).grid(
                 row=0, column=0, padx=8, pady=4, sticky="w"
             )
             ctk.CTkLabel(row, text=kind_short, text_color=_CLR_MUTED, font=ctk.CTkFont(size=11)).grid(
@@ -579,7 +617,15 @@ class GVMApp(ctk.CTk):
                         idx += 1
 
     def _refresh_installed_exts(self, _event=None) -> None:
-        """Scan the selected Ghidra version's Extensions/Ghidra directory."""
+        """Populate the Installed panel for the selected version.
+
+        Combines two views so nothing is hidden:
+          * what's *physically* present in the install (scanning both
+            ``Ghidra/Extensions`` and ``Ghidra/Processors``), and
+          * what GVM *recorded* in its cache — notably DownloadOnly extensions
+            that were fetched but not yet installed through Ghidra's UI.
+        Each row is tagged with its state so the two are distinguishable.
+        """
         for w in self._ext_inst_widgets:
             w.destroy()
         self._ext_inst_widgets.clear()
@@ -588,23 +634,35 @@ class GVMApp(ctk.CTk):
         if not ver or ver == "(none)" or ver not in self.cacher.cache.entries:
             return
 
+        from gvm.extensions import scan_installed_extensions, _load_all_extensions
+
         entry = self.cacher.cache.entries[ver]
-        ext_ghidra_dir = Path(entry.path) / "Ghidra" / "Extensions"
-        if not ext_ghidra_dir.is_dir():
+
+        # (display_name -> (state_label, color)) rows, de-duplicated by name.
+        rows: dict[str, tuple[str, str]] = {}
+
+        # 1. Extensions physically present in Ghidra/Extensions.
+        for found in scan_installed_extensions(Path(entry.path)):
+            rows[found["name"]] = ("installed", _CLR_INSTALLED)
+
+        # 2. Extensions GVM recorded for this version. Use the registry to map
+        #    slug -> (name, kind); ProcessorGit ones are unpacked into the
+        #    install (so "processor"), DownloadOnly ones were only fetched.
+        registry = {e.get("slug"): e for e in _load_all_extensions()}
+        for slug in entry.extensions:
+            reg = registry.get(slug, {})
+            name = reg.get("name", slug)
+            if name in rows:
+                continue  # already shown as physically installed
+            if reg.get("kind") == "ProcessorGit":
+                rows[name] = ("processor", _CLR_INSTALLED)
+            else:
+                rows[name] = ("downloaded, not yet installed", _CLR_MUTED)
+
+        if not rows:
             return
 
-        from gvm.extensions import _parse_extension_properties
-
-        idx = 0
-        for item in sorted(ext_ghidra_dir.iterdir()):
-            if not item.is_dir():
-                continue
-            props_file = item / "extension.properties"
-            if not props_file.is_file():
-                continue
-            props = _parse_extension_properties(props_file)
-            display_name = props.get("name", item.name)
-
+        for idx, (display_name, (state, color)) in enumerate(sorted(rows.items())):
             row = ctk.CTkFrame(self._ext_inst_scroll)
             row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
@@ -612,9 +670,11 @@ class GVMApp(ctk.CTk):
             ctk.CTkLabel(row, text=display_name, anchor="w", font=ctk.CTkFont(size=13)).grid(
                 row=0, column=0, padx=8, pady=4, sticky="w"
             )
+            ctk.CTkLabel(row, text=state, text_color=color, font=ctk.CTkFont(size=11)).grid(
+                row=0, column=1, padx=6, pady=4, sticky="e"
+            )
 
             self._ext_inst_widgets.append(row)
-            idx += 1
 
     # ------------------------------------------------------------------
     # Settings tab
@@ -653,6 +713,16 @@ class GVMApp(ctk.CTk):
         ctk.CTkButton(tab, text="Apply", width=60, command=self._save_prefs).grid(
             row=row_idx, column=2, padx=6
         )
+        row_idx += 1
+
+        # Keep GUI open after launching Ghidra
+        ctk.CTkLabel(tab, text="Keep GUI open on launch:", font=ctk.CTkFont(size=13)).grid(
+            row=row_idx, column=0, sticky="w", padx=(20, 6), pady=6
+        )
+        self._keep_open_var = ctk.BooleanVar(value=self.cacher.cache.prefs.keep_gui_open)
+        self._sw_keep_open = ctk.CTkSwitch(tab, variable=self._keep_open_var, text="",
+                                           command=self._save_prefs)
+        self._sw_keep_open.grid(row=row_idx, column=1, sticky="w", pady=6)
         row_idx += 1
 
         # Install dir
@@ -793,9 +863,10 @@ class GVMApp(ctk.CTk):
         import requests
         self._task_queue.put("Fetching releases...")
         try:
+            # Start small: just the newest few. "Load more" pulls the rest.
             resp = requests.get(
                 "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
-                params={"per_page": 100},
+                params={"per_page": self._INITIAL_VERSION_COUNT, "page": 1},
                 headers={"User-Agent": "gvm"},
                 timeout=30,
             )
@@ -804,6 +875,11 @@ class GVMApp(ctk.CTk):
         except Exception as e:
             self._task_queue.put(f"Failed to fetch releases: {e}")
             return
+
+        # Reset pagination: the next "Load more" starts at page 1 of the larger
+        # page size, and there's more to fetch as long as this batch was full.
+        self._more_page = 1
+        self._has_more = len(self._releases) >= self._INITIAL_VERSION_COUNT
 
         # Also update latest known
         try:
@@ -956,10 +1032,16 @@ class GVMApp(ctk.CTk):
         self.cacher.save()
 
         self._set_status(f"Launching {tag}...")
-        if sys.platform == "linux":
+        if self.cacher.cache.prefs.keep_gui_open:
+            # Default: launch Ghidra as a detached child so this GUI keeps running.
+            subprocess.Popen([str(runner)])
+        elif sys.platform == "linux":
+            # Opt-out behaviour: replace the GUI process with Ghidra.
             os.execv(str(runner), [str(runner)])
         else:
+            # Windows/macOS can't execv a .bat cleanly, so spawn then close.
             subprocess.Popen([str(runner)])
+            self.destroy()
 
     def _on_set_default(self, value: str) -> None:
         self.cacher.cache.default = value
@@ -1000,10 +1082,13 @@ class GVMApp(ctk.CTk):
         kind = entry.get("kind", "DownloadOnly")
         if kind == "DownloadOnly":
             _install_download_only(self.cacher, self._install_path, entry, ghidra_version)
+            # DownloadOnly only fetches the asset — Ghidra still has to install it.
+            self._task_queue.put(
+                f"Downloaded {name} — install it via Ghidra's File→Install Extensions"
+            )
         elif kind == "ProcessorGit":
             _install_processor_git(self.cacher, self._install_path, entry, ghidra_version)
-
-        self._task_queue.put(f"Installed {name}")
+            self._task_queue.put(f"Installed {name}")
 
     def _uninstall_extension(self, slug: str) -> None:
         ver = self._ext_ver_var.get()
@@ -1080,19 +1165,109 @@ class GVMApp(ctk.CTk):
         self._rebuild_avail_exts()
         self._set_status(f"Rescanned {ext_dir}")
 
+    def _name_widget(self, parent, text: str, url: str | None):
+        """Return a label for *text*; when *url* is set it's a clickable link.
+
+        A plain label auto-sizes to the text (so long repo names aren't
+        truncated). When a repo URL is known we style it like a hyperlink
+        (accent colour, underline) and open the repo in the browser on click.
+        """
+        if not url:
+            return ctk.CTkLabel(parent, text=text, anchor="w", font=ctk.CTkFont(size=13))
+        lbl = ctk.CTkLabel(
+            parent, text=text, anchor="w",
+            font=ctk.CTkFont(size=13, underline=True), text_color=_CLR_DEFAULT,
+        )
+        lbl.bind("<Button-1>", lambda _e, u=url: webbrowser.open(u))
+        return lbl
+
+    def _add_extension_dialog(self) -> None:
+        """Open the 'Add from git url' modal and act on the result."""
+        result = _AddExtensionDialog(self).show()
+        if result is None:
+            return  # user cancelled
+
+        from gvm.extensions import add_extension_from_url
+
+        try:
+            entry = add_extension_from_url(result["url"], result["kind"])
+        except ValueError as e:
+            self._set_status(f"Couldn't add extension: {e}")
+            return
+
+        # Surface the new entry in the Available list immediately.
+        self._rebuild_avail_exts()
+        self._set_status(f"Added {entry['name']}")
+
+        # Optionally fetch the release now into the user's Extensions directory.
+        if result["download"]:
+            ver = self._ext_ver_var.get()
+            if not ver or ver == "(none)":
+                self._set_status(f"Added {entry['name']} — select a version to download it")
+                return
+            self._run_threaded(self._do_download_added_extension, entry, ver)
+
+    def _do_download_added_extension(self, entry: dict, ghidra_version: str) -> None:
+        """Download a just-added extension into the configured Extensions dir."""
+        from gvm.extensions import _install_download_only, _install_processor_git
+
+        # Prefer the user's configured extensions directory; fall back to the
+        # install dir so the download still lands somewhere sensible.
+        ext_dir_str = self.cacher.cache.prefs.ext_dir
+        target = Path(ext_dir_str) if ext_dir_str and Path(ext_dir_str).is_dir() else self._install_path
+
+        self._task_queue.put(f"Downloading {entry['name']}...")
+        if entry["kind"] == "DownloadOnly":
+            _install_download_only(self.cacher, target, entry, ghidra_version)
+            self._task_queue.put(
+                f"Downloaded {entry['name']} to {target} — install via Ghidra's File→Install Extensions"
+            )
+        else:
+            _install_processor_git(self.cacher, target, entry, ghidra_version)
+            self._task_queue.put(f"Installed {entry['name']}")
+
     # ------------------------------------------------------------------
     # Settings operations
     # ------------------------------------------------------------------
 
     def _save_prefs(self) -> None:
         self.cacher.cache.prefs.pyghidra = self._pyghidra_var.get()
+        self.cacher.cache.prefs.keep_gui_open = self._keep_open_var.get()
+        # Remember the old scale so we can tell whether it actually changed.
+        old_scale = self.cacher.cache.prefs.ui_scale_override
         try:
-            self.cacher.cache.prefs.ui_scale_override = int(self._scale_var.get())
+            new_scale = int(self._scale_var.get())
         except ValueError:
             self._set_status("UI scale must be an integer")
             return
+        self.cacher.cache.prefs.ui_scale_override = new_scale
         self.cacher.save()
         self._set_status("Preferences saved")
+
+        # The scale is baked into each install's launch.properties at install
+        # time, so a change only affects *future* installs unless we re-patch.
+        # Offer to apply it to versions already installed.
+        if new_scale != old_scale and self.cacher.cache.entries:
+            if messagebox.askyesno(
+                "Apply UI scale",
+                f"Re-apply UI scale {new_scale} to "
+                f"{len(self.cacher.cache.entries)} already-installed version(s)?",
+            ):
+                self._reapply_scale_to_installs(new_scale)
+
+    def _reapply_scale_to_installs(self, scale: int) -> None:
+        """Rewrite every installed version's launch.properties with *scale*."""
+        from gvm.install import apply_ui_scale
+
+        patched = 0
+        for tag, entry in self.cacher.cache.entries.items():
+            try:
+                apply_ui_scale(Path(entry.path), scale)
+                patched += 1
+            except Exception as e:
+                # A missing/renamed install shouldn't abort the whole loop.
+                logger.warning("Could not re-apply scale to %s: %s", tag, e)
+        self._set_status(f"Applied UI scale {scale} to {patched} version(s)")
 
     def _browse_install_dir(self) -> None:
         d = filedialog.askdirectory(title="Select Install Directory")
@@ -1188,6 +1363,88 @@ class GVMApp(ctk.CTk):
             self._set_status(f"Restored settings to {ver}")
         except Exception as e:
             self._set_status(f"Restore failed: {e}")
+
+
+class _AddExtensionDialog(ctk.CTkToplevel):
+    """Modal dialog for the 'Add from git url' feature.
+
+    Collects a git repo URL, the install *kind* (with a short explanation of
+    each), and whether to download the release into the Extensions directory
+    right away. :meth:`show` blocks until the dialog closes and returns a dict
+    ``{"url", "kind", "download"}`` on OK, or ``None`` on cancel.
+    """
+
+    def __init__(self, parent) -> None:
+        super().__init__(parent)
+        self.title("Add Extension from git URL")
+        self.geometry("480x340")
+        self.resizable(False, False)
+        self._result: dict | None = None
+
+        # Make the dialog modal: grab focus and sit above the main window.
+        self.transient(parent)
+        self.grab_set()
+
+        pad = {"padx": 16, "pady": (8, 0)}
+
+        ctk.CTkLabel(self, text="Git repository URL:", anchor="w",
+                     font=ctk.CTkFont(size=13)).pack(fill="x", **pad)
+        self._url_var = ctk.StringVar()
+        self._url_entry = ctk.CTkEntry(self, textvariable=self._url_var,
+                                       placeholder_text="https://github.com/owner/repo")
+        self._url_entry.pack(fill="x", padx=16, pady=(2, 8))
+
+        ctk.CTkLabel(self, text="Install kind:", anchor="w",
+                     font=ctk.CTkFont(size=13)).pack(fill="x", padx=16)
+        self._kind_var = ctk.StringVar(value="DownloadOnly")
+        ctk.CTkRadioButton(self, text="DownloadOnly", variable=self._kind_var,
+                           value="DownloadOnly").pack(anchor="w", padx=24, pady=(4, 0))
+        ctk.CTkLabel(
+            self, text="Downloads a release asset; you install it via Ghidra's "
+                       "File→Install Extensions.",
+            anchor="w", justify="left", wraplength=420,
+            text_color=_CLR_MUTED, font=ctk.CTkFont(size=11),
+        ).pack(fill="x", padx=44)
+        ctk.CTkRadioButton(self, text="ProcessorGit", variable=self._kind_var,
+                           value="ProcessorGit").pack(anchor="w", padx=24, pady=(6, 0))
+        ctk.CTkLabel(
+            self, text="Clones the repo's processor module straight into "
+                       "Ghidra/Processors. Only for processor modules.",
+            anchor="w", justify="left", wraplength=420,
+            text_color=_CLR_MUTED, font=ctk.CTkFont(size=11),
+        ).pack(fill="x", padx=44)
+
+        self._download_var = ctk.BooleanVar(value=False)
+        ctk.CTkCheckBox(self, text="Also download into my Extensions directory now",
+                        variable=self._download_var).pack(anchor="w", padx=24, pady=(10, 0))
+
+        btns = ctk.CTkFrame(self, fg_color="transparent")
+        btns.pack(fill="x", padx=16, pady=12)
+        ctk.CTkButton(btns, text="Cancel", width=90, fg_color="transparent",
+                      border_width=1, command=self._on_cancel).pack(side="right", padx=(6, 0))
+        ctk.CTkButton(btns, text="Add", width=90, command=self._on_add).pack(side="right")
+
+    def _on_add(self) -> None:
+        url = self._url_var.get().strip()
+        if not url:
+            return  # ignore empty submissions
+        self._result = {
+            "url": url,
+            "kind": self._kind_var.get(),
+            "download": self._download_var.get(),
+        }
+        self.grab_release()
+        self.destroy()
+
+    def _on_cancel(self) -> None:
+        self._result = None
+        self.grab_release()
+        self.destroy()
+
+    def show(self) -> dict | None:
+        # Block the caller until the dialog is dismissed, then hand back the result.
+        self.wait_window()
+        return self._result
 
 
 def _lock_path() -> Path:
