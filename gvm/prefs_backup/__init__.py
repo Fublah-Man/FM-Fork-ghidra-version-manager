@@ -1,3 +1,12 @@
+"""Helpers for locating and backing up Ghidra's user preferences.
+
+Ghidra stores per-version user preferences (key bindings, recent projects, ...)
+outside the install directory, in a platform-specific config location. This
+package can snapshot that preferences file into a portable ZIP and restore it
+again — used both for explicit `gvm settings backup/restore` and for the
+automatic prefs migration when switching versions.
+"""
+
 import sys
 from pathlib import Path
 
@@ -16,6 +25,8 @@ def ghidra_prefs_path(install_dir_name: str) -> Path:
         Windows: %APPDATA%/ghidra/<install_dir>/preferences
         Linux/macOS: ~/.config/ghidra/<install_dir>/preferences
     """
+    # Ghidra keys its config directory off the install folder name, so the
+    # caller passes that (not the version tag).
     if sys.platform == "win32":
         base = Path.home() / "AppData" / "Roaming"
     else:

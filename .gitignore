@@ -2,3 +2,12 @@
 .idea
 .DS_Store
 .claude/
+
+# Python build / cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/

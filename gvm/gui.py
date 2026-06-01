@@ -1,4 +1,22 @@
-"""Ghidra Version Manager - CustomTkinter GUI."""
+"""Ghidra Version Manager - CustomTkinter GUI.
+
+A dark-mode desktop front-end over the same cache and install/extension logic
+the CLI uses. It has three tabs:
+
+  * **Versions**    - browse GitHub releases, install/run/uninstall, set the
+    default, and read each release's "What's New" notes.
+  * **Extensions**  - install registry or local extensions into a chosen
+    version and see what's already installed.
+  * **Settings**    - toggle PyGhidra, set the UI scale, choose install/extension
+    directories, and back up / restore preferences.
+
+Threading model: the Tk event loop must stay responsive, so any slow work
+(network requests, installs) runs on a daemon thread via :meth:`_run_threaded`.
+Those threads never touch widgets directly; instead they push status strings
+onto ``self._task_queue`` and the main thread drains it in :meth:`_poll_queue`,
+which is the only place the UI is mutated. A ``None`` sentinel on the queue
+marks "task finished".
+"""
 
 import argparse
 import atexit
@@ -709,32 +727,43 @@ class GVMApp(ctk.CTk):
         self._status_var.set(msg)
 
     def _poll_queue(self) -> None:
+        # Runs on the Tk main thread every 100 ms. Drains every message a worker
+        # thread has queued and applies it to the UI (workers never touch Tk).
         try:
             while True:
                 msg = self._task_queue.get_nowait()
                 if msg is None:
-                    # Task finished
+                    # Sentinel: the current background task has finished.
                     self._busy = False
                     if self._pending_restart:
+                        # A self-update just completed — relaunch and stop polling.
                         self._pending_restart = False
                         self._restart_gui()
                         return
+                    # Reload the cache (the worker may have changed it) and
+                    # refresh every tab so the UI reflects the new state.
                     self.cacher = Cacher.load(self._default_path / "cache.toml")
                     self._rebuild_version_rows()
                     self._refresh_ext_tab()
                     self._refresh_backup_versions()
                 elif isinstance(msg, tuple) and msg[0] == "__update_available__":
+                    # Special message from the GVM self-update check.
                     self._busy = False
                     tag = msg[1]
                     self._set_status(f"New version available: {tag}")
                     self._prompt_update(tag)
                 else:
+                    # Plain string: just a status-bar update.
                     self._set_status(msg)
         except queue.Empty:
+            # Nothing left to process this tick.
             pass
+        # Reschedule ourselves.
         self.after(100, self._poll_queue)
 
     def _run_threaded(self, fn, *args, **kwargs) -> None:
+        # Start *fn* on a daemon thread, but only one heavy task at a time so
+        # concurrent installs can't corrupt the shared cache.
         if self._busy:
             self._set_status("Another operation is in progress...")
             return
@@ -743,6 +772,9 @@ class GVMApp(ctk.CTk):
         t.start()
 
     def _thread_wrapper(self, fn, *args, **kwargs) -> None:
+        # Runs the task on the worker thread, funnelling any error to the status
+        # bar and always posting the None "finished" sentinel so _poll_queue can
+        # clear the busy flag even when the task raised.
         try:
             fn(*args, **kwargs)
         except Exception as e:
@@ -862,9 +894,15 @@ class GVMApp(ctk.CTk):
 
     def _restart_gui(self) -> None:
         """Close the current window and re-launch the GUI in a new process."""
+        # Release the single-instance lock first so the child can re-acquire it.
         _release_lock()
         self.destroy()
-        subprocess.Popen([sys.executable, "-m", "gvm.gui"])
+        # Spawn a fresh GUI process. poll() immediately after launch catches the
+        # case where the interpreter couldn't even start the module (e.g. a
+        # broken install), so we can log it rather than silently vanishing.
+        proc = subprocess.Popen([sys.executable, "-m", "gvm.gui"])
+        if proc.poll() is not None:
+            logger.error("Failed to restart GVM GUI (exit code %s)", proc.returncode)
 
     def _install_version(self, tag: str) -> None:
         self._run_threaded(self._do_install_version, tag)
@@ -1157,38 +1195,71 @@ def _lock_path() -> Path:
     return _default_gvm_path() / ".gui.lock"
 
 
+def _pid_is_running(pid: int) -> bool:
+    """Return True if a process with *pid* currently exists."""
+    if sys.platform == "win32":
+        # On Windows there's no signal-0 trick; ask the OS for a handle and
+        # treat success as "still alive".
+        import ctypes
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+        )
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    # POSIX: signal 0 does no work but still validates the target exists.
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def _acquire_lock() -> bool:
     """Try to acquire the single-instance lock.
 
-    Uses a PID-based lock file. If a lock file exists but the PID within
-    it is no longer running, the stale lock is removed and re-acquired.
-    Returns True if the lock was acquired, False if another instance is running.
+    Uses a PID-based lock file created *atomically* with ``O_CREAT | O_EXCL`` so
+    two GUIs racing to start can't both believe they won (which a plain
+    "check-then-write" would allow). If the create fails because the file
+    already exists, we inspect the recorded PID: if that process is gone the
+    lock is stale, so we remove it and retry once. Returns True if the lock was
+    acquired, False if another live instance holds it.
     """
     lock = _lock_path()
     lock.parent.mkdir(parents=True, exist_ok=True)
 
-    if lock.exists():
+    # Two attempts: the second runs only after we've cleared a stale lock.
+    for _attempt in range(2):
         try:
-            old_pid = int(lock.read_text().strip())
-            # Check if the process is still alive
-            if sys.platform == "win32":
-                import ctypes
-                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-                handle = ctypes.windll.kernel32.OpenProcess(
-                    PROCESS_QUERY_LIMITED_INFORMATION, False, old_pid
-                )
-                if handle:
-                    ctypes.windll.kernel32.CloseHandle(handle)
-                    return False  # Process still running
-                # Process not found — stale lock
-            else:
-                os.kill(old_pid, 0)  # Raises OSError if process doesn't exist
-                return False  # Process still running
-        except (ValueError, OSError):
-            pass  # Stale lock — remove and re-acquire
+            # Atomic create-if-absent; fails with FileExistsError if held.
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            # Someone holds (or held) the lock. Decide if it's stale.
+            try:
+                old_pid = int(lock.read_text().strip())
+            except (ValueError, OSError):
+                # Unreadable/garbage lock — treat as stale and clear it.
+                old_pid = None
 
-    lock.write_text(str(os.getpid()))
-    return True
+            if old_pid is not None and _pid_is_running(old_pid):
+                return False  # A live instance owns the lock.
+
+            # Stale lock: remove it and loop to retry the atomic create.
+            try:
+                lock.unlink(missing_ok=True)
+            except OSError:
+                return False
+            continue
+        else:
+            # We won the race; record our PID and release the fd.
+            with os.fdopen(fd, "w") as f:
+                f.write(str(os.getpid()))
+            return True
+
+    # Both attempts failed (e.g. another process re-grabbed the stale lock).
+    return False
 
 
 def _release_lock() -> None:
