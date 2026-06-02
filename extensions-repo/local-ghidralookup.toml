@@ -1,0 +1,16 @@
+name = "GhidraLookup"
+slug = "local-ghidralookup"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: GhidraLookup"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_10.0.1_PUBLIC_20210805_GhidraLookup.zip"
+version = "10.0.1"

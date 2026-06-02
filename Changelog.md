@@ -8,10 +8,13 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 ## Python Fork (Fublah-Man)
 
-### 0.3 - 2026-05-14
+### 0.3 - 2026-05-16
 
 #### Changed
 - **GUI: Extensions tab reworked** — "Installed Extensions" now scans the selected Ghidra version's `Ghidra/Extensions/` directory on disk instead of reading from the GVM cache. "Available Extensions" now includes both the built-in registry and any local extensions discovered from the configured extensions directory (shown under a "Local Extensions" header). The "Scan Ext Dir" button refreshes the available list. Local extensions can be installed (copied into the Ghidra Extensions directory) with a single click.
+- **GUI: Extension version info** — both the Installed and Local Available extension lists now display the extension version number and Ghidra compatibility version (parsed from `extension.properties` fields `version` and `createdOn`).
+- **GUI: Extension update check** — a "Check For Updates" button in the Extensions toolbar compares installed extension versions against both latest GitHub releases (for registry extensions) and local source versions (for extensions from the configured extensions directory). When a newer version is found, a gold "Update" button appears below the "Install" button in the Available list. For registry extensions, this downloads the latest release; for local extensions, it re-copies from the source directory.
+- **GUI: Extension uninstall** — each entry in the Installed Extensions list now has an "Uninstall" button to remove the extension from the Ghidra directory.
 
 #### Improved
 - **GUI: Version row separators** — thin horizontal lines now visually separate each version listing for clearer readability.

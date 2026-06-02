@@ -2,5 +2,12 @@ name = "NTR"
 slug = "loader-ntr"
 repo_user = "pedro-javierf"
 repo_repo = "NTRGhidra"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "A Nintendo DS binary loader for Ghidra"
+author = "pedro-javierf"
+license = "Apache-2.0"
+category = "loader"
+homepage = ""
+asset_pattern = "NTRGhidra-build.zip"
+tags = ["ghidra", "ghidra-extension", "ghidra-loader", "ghidra-plugin", "nds", "nintendo", "nintendo-ds", "ntr", "reverse-engineering"]

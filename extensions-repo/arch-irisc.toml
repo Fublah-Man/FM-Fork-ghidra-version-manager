@@ -2,7 +2,14 @@ name = "iRISC"
 slug = "arch-irisc"
 repo_user = "irisc-research-syndicate"
 repo_repo = "ghidra-processor"
+kind = "ProcessorGit"
+branch_name = "master"
+no_prefix = true
 
-branch_name="master"
-no_prefix=true
-kind="ProcessorGit"
+description = "iRISC processor module for Ghidra"
+author = "irisc-research-syndicate"
+license = ""
+category = "processor"
+homepage = ""
+asset_pattern = ""
+tags = []

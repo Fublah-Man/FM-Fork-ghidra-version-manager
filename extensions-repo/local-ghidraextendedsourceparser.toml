@@ -1,0 +1,17 @@
+name = "GhidraExtendedSourceParser"
+slug = "local-ghidraextendedsourceparser"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: GhidraExtendedSourceParser"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_12.0.1_PUBLIC_20260117_GhidraExtendedSourceParser.zip"
+version = "12.0.1"
+min_ghidra_version = "25/10/2024"

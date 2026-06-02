@@ -2,5 +2,12 @@ name = "Delinker"
 slug = "exporter-delinker"
 repo_user = "boricj"
 repo_repo = "ghidra-delinker-extension"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Ghidra extension for exporting relocatable object files"
+author = "boricj"
+license = "Apache-2.0"
+category = "exporter"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_ghidra-delinker-extension.zip"
+tags = ["delinking", "ghidra", "ghidra-extension", "reverse-engineering"]

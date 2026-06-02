@@ -2,5 +2,12 @@ name = "c166"
 slug = "arch-c166"
 repo_user = "keyhana"
 repo_repo = "c166-ghidra-module"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Infineon C166 processor module for Ghidra"
+author = "keyhana"
+license = "MIT"
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_c166-ghidra-module.zip"
+tags = []

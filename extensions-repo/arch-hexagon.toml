@@ -2,5 +2,12 @@ name = "Hexagon"
 slug = "arch-hexagon"
 repo_user = "CUB3D"
 repo_repo = "ghidra-hexagon-sleigh"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "A version-agnostic Ghidra plugin for decompiling Qualcomm Hexagon QDSP6"
+author = "CUB3D"
+license = "GPL-3.0"
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_Hexagon.zip"
+tags = ["binary-analysis", "decompiler", "ghidra", "ghidra-extension", "hexagon", "qualcomm", "reverse-engineering"]

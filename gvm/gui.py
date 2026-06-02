@@ -85,7 +85,7 @@ class GVMApp(ctk.CTk):
         )
         self._install_path.mkdir(parents=True, exist_ok=True)
 
-        self._task_queue: queue.Queue[str | None] = queue.Queue()
+        self._task_queue: queue.Queue[str | tuple[str, str] | None] = queue.Queue()
         self._busy = False
         self._releases: list[dict] = []
         # Incremental release fetching: we start with the 5 newest releases and
@@ -99,6 +99,7 @@ class GVMApp(ctk.CTk):
         self._pending_restart = False
         self._whats_new_cache: dict[str, str | None] = {}
         self._expanded_tags: set[str] = set()
+        self._ext_updates: dict[str, str] = {}  # ext name -> latest release tag
 
         # --- Layout ---
         self.grid_rowconfigure(0, weight=1)
@@ -180,7 +181,7 @@ class GVMApp(ctk.CTk):
         self._ver_scroll.grid(row=1, column=0, sticky="nsew")
         self._ver_scroll.grid_columnconfigure(0, weight=1)
 
-        self._ver_widgets: list[ctk.CTkFrame] = []
+        self._ver_widgets: list[ctk.CTkFrame | ctk.CTkButton] = []
 
     def _rebuild_version_rows(self) -> None:
         """Rebuild the version list from self._releases + cache."""
@@ -506,8 +507,14 @@ class GVMApp(ctk.CTk):
         self._opt_ext_ver = ctk.CTkOptionMenu(top, variable=self._ext_ver_var, values=["(none)"], width=220,
                                               command=lambda _: self._refresh_installed_exts())
         self._opt_ext_ver.pack(side="left")
+<<<<<<< Updated upstream
         ctk.CTkButton(top, text="Scan Ext Dir", width=120, command=self._scan_extensions).pack(side="right")
         ctk.CTkButton(top, text="Add from git url", width=140, command=self._add_extension_dialog).pack(side="right", padx=(0, 6))
+=======
+        ctk.CTkButton(top, text="Check For Updates", width=140, command=self._check_ext_updates).pack(side="right")
+        ctk.CTkButton(top, text="Scan Installed Ext", width=140, command=self._refresh_installed_exts).pack(side="right", padx=(0, 6))
+        ctk.CTkButton(top, text="Scan Ext Dir", width=120, command=self._scan_extensions).pack(side="right", padx=(0, 6))
+>>>>>>> Stashed changes
 
         # Left: available extensions
         left_label = ctk.CTkLabel(tab, text="Available Extensions", font=ctk.CTkFont(size=14, weight="bold"))
@@ -551,6 +558,7 @@ class GVMApp(ctk.CTk):
             w.destroy()
         self._ext_avail_widgets.clear()
 
+<<<<<<< Updated upstream
         from gvm.extensions import repo_url_for
 
         idx = 0
@@ -575,6 +583,32 @@ class GVMApp(ctk.CTk):
 
             self._ext_avail_widgets.append(row)
             idx += 1
+=======
+        # Build a merged list: registry extensions + local extensions, deduplicated by name
+        # Each merged entry is a dict with unified keys for rendering
+        merged: dict[str, dict] = {}  # keyed by lowercase name
+
+        # Registry extensions
+        for ext in _load_all_extensions():
+            key = ext["name"].lower()
+            kind = ext.get("kind", "DownloadOnly")
+            if kind == "Local":
+                tag = "Local"
+            elif kind == "DownloadOnly":
+                tag = "DL"
+            else:
+                tag = "Git"
+            merged[key] = {
+                "name": ext["name"],
+                "tag": tag,
+                "version": ext.get("version", ""),
+                "min_ghidra": ext.get("min_ghidra_version", ""),
+                "max_ghidra": ext.get("max_ghidra_version", ""),
+                "source": "registry",
+                "registry_ext": ext,
+                "local_ext": None,
+            }
+>>>>>>> Stashed changes
 
         # Local extensions from the configured extensions directory
         ext_dir_str = self.cacher.cache.prefs.ext_dir
@@ -582,39 +616,96 @@ class GVMApp(ctk.CTk):
             ext_dir = Path(ext_dir_str)
             if ext_dir.is_dir():
                 local_exts = _scan_ext_dir(ext_dir)
-                if local_exts:
-                    # Separator + header
-                    sep = ctk.CTkFrame(self._ext_avail_scroll, height=1, fg_color=("gray70", "gray30"))
-                    sep.grid(row=idx, column=0, sticky="ew", padx=6, pady=(4, 2))
-                    self._ext_avail_widgets.append(sep)
-                    idx += 1
+                for ext in local_exts:
+                    key = ext["name"].lower()
+                    if key in merged:
+                        # Merge: add local data to the existing registry entry
+                        entry = merged[key]
+                        entry["local_ext"] = ext
+                        entry["tag"] = entry["tag"] + "+Local" if entry["tag"] != "Local" else "Local"
+                        # Prefer local version/compat info if available (more current)
+                        if ext.get("version"):
+                            entry["version"] = ext["version"]
+                        if ext.get("createdOn"):
+                            entry["min_ghidra"] = ext["createdOn"]
+                    else:
+                        # Local-only extension not in registry
+                        merged[key] = {
+                            "name": ext["name"],
+                            "tag": "Local",
+                            "version": ext.get("version", ""),
+                            "min_ghidra": ext.get("createdOn", ""),
+                            "max_ghidra": "",
+                            "source": "local",
+                            "registry_ext": None,
+                            "local_ext": ext,
+                        }
 
-                    hdr = ctk.CTkLabel(
-                        self._ext_avail_scroll, text="Local Extensions",
-                        font=ctk.CTkFont(size=12, weight="bold"), anchor="w",
-                    )
-                    hdr.grid(row=idx, column=0, sticky="w", padx=8, pady=(2, 2))
-                    self._ext_avail_widgets.append(hdr)
-                    idx += 1
+        # Render the merged list
+        idx = 0
+        for entry in sorted(merged.values(), key=lambda e: e["name"].lower()):
+            row = ctk.CTkFrame(self._ext_avail_scroll)
+            row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
+            row.grid_columnconfigure(0, weight=1)
 
-                    for ext in local_exts:
-                        row = ctk.CTkFrame(self._ext_avail_scroll)
-                        row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
-                        row.grid_columnconfigure(0, weight=1)
+            # Row 0: name + tag + buttons
+            ctk.CTkLabel(row, text=entry["name"], anchor="w", font=ctk.CTkFont(size=13)).grid(
+                row=0, column=0, padx=8, pady=(4, 0), sticky="w"
+            )
+            ctk.CTkLabel(
+                row, text=entry["tag"], text_color=_CLR_MUTED, font=ctk.CTkFont(size=11),
+            ).grid(row=0, column=1, padx=4, pady=(4, 0))
 
-                        ctk.CTkLabel(row, text=ext["name"], anchor="w", font=ctk.CTkFont(size=13)).grid(
-                            row=0, column=0, padx=8, pady=4, sticky="w"
-                        )
-                        ctk.CTkLabel(row, text="Local", text_color=_CLR_MUTED, font=ctk.CTkFont(size=11)).grid(
-                            row=0, column=1, padx=4
-                        )
-                        ctk.CTkButton(
-                            row, text="Install", width=70,
-                            command=lambda e=ext: self._install_local_extension(e),
-                        ).grid(row=0, column=2, padx=6, pady=3)
+            # Row 1: version and Ghidra compatibility info
+            info_parts: list[str] = []
+            if entry["version"]:
+                info_parts.append(f"v{entry['version']}")
+            if entry["min_ghidra"] and entry["max_ghidra"]:
+                info_parts.append(f"Ghidra {entry['min_ghidra']}–{entry['max_ghidra']}")
+            elif entry["min_ghidra"]:
+                info_parts.append(f"Ghidra {entry['min_ghidra']}+")
+            elif entry["max_ghidra"]:
+                info_parts.append(f"Ghidra ≤{entry['max_ghidra']}")
+            info_text = "  •  ".join(info_parts) if info_parts else ""
+            if info_text:
+                ctk.CTkLabel(
+                    row, text=info_text, text_color=_CLR_MUTED,
+                    font=ctk.CTkFont(size=11), anchor="w",
+                ).grid(row=1, column=0, padx=10, pady=(0, 4), sticky="w")
 
-                        self._ext_avail_widgets.append(row)
-                        idx += 1
+            # Buttons
+            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+            btn_frame.grid(row=0, column=2, rowspan=2, padx=6, pady=3)
+
+            # Install button — prefer local install if available, else registry
+            if entry["local_ext"]:
+                ctk.CTkButton(
+                    btn_frame, text="Install", width=70,
+                    command=lambda e=entry["local_ext"]: self._install_local_extension(e),
+                ).pack(side="top", pady=(0, 1))
+            elif entry["registry_ext"]:
+                ctk.CTkButton(
+                    btn_frame, text="Install", width=70,
+                    command=lambda n=entry["name"]: self._install_extension(n),
+                ).pack(side="top", pady=(0, 1))
+
+            # Update button
+            if entry["name"] in self._ext_updates:
+                if entry["local_ext"]:
+                    ctk.CTkButton(
+                        btn_frame, text="Update", width=70,
+                        fg_color="#d4a017", hover_color="#b8860b",
+                        command=lambda e=entry["local_ext"]: self._update_local_extension(e),
+                    ).pack(side="top", pady=(1, 0))
+                elif entry["registry_ext"]:
+                    ctk.CTkButton(
+                        btn_frame, text="Update", width=70,
+                        fg_color="#d4a017", hover_color="#b8860b",
+                        command=lambda n=entry["name"]: self._install_extension(n),
+                    ).pack(side="top", pady=(1, 0))
+
+            self._ext_avail_widgets.append(row)
+            idx += 1
 
     def _refresh_installed_exts(self, _event=None) -> None:
         """Populate the Installed panel for the selected version.
@@ -637,6 +728,7 @@ class GVMApp(ctk.CTk):
         from gvm.extensions import scan_installed_extensions, _load_all_extensions
 
         entry = self.cacher.cache.entries[ver]
+<<<<<<< Updated upstream
 
         # (display_name -> (state_label, color)) rows, de-duplicated by name.
         rows: dict[str, tuple[str, str]] = {}
@@ -663,16 +755,82 @@ class GVMApp(ctk.CTk):
             return
 
         for idx, (display_name, (state, color)) in enumerate(sorted(rows.items())):
+=======
+        ext_ghidra_dir = Path(entry.path) / "Extensions" / "Ghidra"
+        if not ext_ghidra_dir.is_dir():
+            return
+
+        import zipfile
+        from gvm.extensions import _parse_extension_properties
+
+        idx = 0
+        for item in sorted(ext_ghidra_dir.iterdir()):
+            props: dict[str, str] = {}
+            if item.is_dir():
+                props_file = item / "extension.properties"
+                if not props_file.is_file():
+                    continue
+                props = _parse_extension_properties(props_file)
+            elif item.is_file() and item.suffix.lower() == ".zip":
+                try:
+                    with zipfile.ZipFile(item, "r") as zf:
+                        props_entry = None
+                        for zi in zf.namelist():
+                            basename = zi.rsplit("/", 1)[-1] if "/" in zi else zi
+                            if basename == "extension.properties" and zi.count("/") <= 1:
+                                props_entry = zi
+                                break
+                        if props_entry:
+                            raw = zf.read(props_entry).decode("utf-8", errors="replace")
+                            for line in raw.splitlines():
+                                line = line.strip()
+                                if line and not line.startswith("#") and "=" in line:
+                                    k, _, v = line.partition("=")
+                                    props[k.strip()] = v.strip()
+                        else:
+                            continue
+                except zipfile.BadZipFile:
+                    continue
+            else:
+                continue
+
+            # Skip template/placeholder entries (unresolved @variables@)
+            display_name = props.get("name", item.stem)
+            if display_name.startswith("@") and display_name.endswith("@"):
+                continue
+
+>>>>>>> Stashed changes
             row = ctk.CTkFrame(self._ext_inst_scroll)
             row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
 
             ctk.CTkLabel(row, text=display_name, anchor="w", font=ctk.CTkFont(size=13)).grid(
-                row=0, column=0, padx=8, pady=4, sticky="w"
+                row=0, column=0, padx=8, pady=(4, 0), sticky="w"
             )
             ctk.CTkLabel(row, text=state, text_color=color, font=ctk.CTkFont(size=11)).grid(
                 row=0, column=1, padx=6, pady=4, sticky="e"
             )
+
+            # Version and Ghidra compatibility
+            info_parts: list[str] = []
+            ext_ver = props.get("version", "")
+            ext_compat = props.get("createdOn", "")
+            if ext_ver and not ext_ver.startswith("@"):
+                info_parts.append(f"v{ext_ver}")
+            if ext_compat and not ext_compat.startswith("@"):
+                info_parts.append(f"for Ghidra {ext_compat}")
+            if info_parts:
+                ctk.CTkLabel(
+                    row, text="  •  ".join(info_parts), text_color=_CLR_MUTED,
+                    font=ctk.CTkFont(size=11), anchor="w",
+                ).grid(row=1, column=0, padx=10, pady=(0, 4), sticky="w")
+
+            # Uninstall button
+            ctk.CTkButton(
+                row, text="Uninstall", width=70, height=26,
+                fg_color=_CLR_DANGER, hover_color="#c9302c",
+                command=lambda p=item: self._uninstall_installed_ext(p),
+            ).grid(row=0, column=1, rowspan=2, padx=6, pady=3, sticky="e")
 
             self._ext_inst_widgets.append(row)
 
@@ -823,8 +981,12 @@ class GVMApp(ctk.CTk):
                     self._set_status(f"New version available: {tag}")
                     self._prompt_update(tag)
                 else:
+<<<<<<< Updated upstream
                     # Plain string: just a status-bar update.
                     self._set_status(msg)
+=======
+                    self._set_status(msg is not None and str(msg) or "")
+>>>>>>> Stashed changes
         except queue.Empty:
             # Nothing left to process this tick.
             pass
@@ -1137,7 +1299,7 @@ class GVMApp(ctk.CTk):
             return
 
         src = Path(ext["path"])
-        dest_dir = Path(ghidra_ent.path) / "Ghidra" / "Extensions"
+        dest_dir = Path(ghidra_ent.path) / "Extensions" / "Ghidra"
         dest_dir.mkdir(parents=True, exist_ok=True)
         dest = dest_dir / src.name
 
@@ -1152,8 +1314,167 @@ class GVMApp(ctk.CTk):
             shutil.copy2(str(src), str(dest))
         self._task_queue.put(f"Installed {ext['name']}")
 
+    def _update_local_extension(self, ext: dict) -> None:
+        """Re-copy a local extension into the selected Ghidra version, overwriting the old one."""
+        ver = self._ext_ver_var.get()
+        if not ver or ver == "(none)":
+            self._set_status("Select a Ghidra version first")
+            return
+        self._run_threaded(self._do_update_local_extension, ext, ver)
+
+    def _do_update_local_extension(self, ext: dict, ghidra_version: str) -> None:
+        ghidra_ent = self.cacher.cache.entries.get(ghidra_version)
+        if ghidra_ent is None:
+            self._task_queue.put(f"Version {ghidra_version} not installed")
+            return
+
+        src = Path(ext["path"])
+        dest_dir = Path(ghidra_ent.path) / "Extensions" / "Ghidra"
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+
+        self._task_queue.put(f"Updating {ext['name']}...")
+
+        # Remove old version
+        if dest.exists():
+            if dest.is_dir():
+                shutil.rmtree(dest, ignore_errors=True)
+            else:
+                dest.unlink(missing_ok=True)
+
+        # Copy new version
+        if src.is_dir():
+            shutil.copytree(str(src), str(dest))
+        else:
+            shutil.copy2(str(src), str(dest))
+
+        # Remove from updates dict so the Update button disappears on rebuild
+        self._ext_updates.pop(ext["name"], None)
+        self._task_queue.put(f"Updated {ext['name']}")
+
+    def _uninstall_installed_ext(self, ext_path: Path) -> None:
+        """Remove an installed extension (file or directory) and refresh the list."""
+        name = ext_path.stem
+        if ext_path.is_dir():
+            shutil.rmtree(ext_path, ignore_errors=True)
+        elif ext_path.is_file():
+            ext_path.unlink(missing_ok=True)
+        self._set_status(f"Uninstalled {name}")
+        self._refresh_installed_exts()
+
+    def _check_ext_updates(self) -> None:
+        """Check available registry extensions for newer versions on GitHub."""
+        ver = self._ext_ver_var.get()
+        if not ver or ver == "(none)":
+            self._set_status("Select a Ghidra version first")
+            return
+        self._run_threaded(self._do_check_ext_updates, ver)
+
+    def _do_check_ext_updates(self, ghidra_version: str) -> None:
+        """Compare installed extension versions against latest GitHub releases and local sources."""
+        import requests
+        import zipfile
+
+        self._task_queue.put("Checking for extension updates...")
+
+        # Build a map of installed extension names -> versions
+        entry = self.cacher.cache.entries.get(ghidra_version)
+        installed_versions: dict[str, str] = {}
+        if entry:
+            ext_ghidra_dir = Path(entry.path) / "Extensions" / "Ghidra"
+            if ext_ghidra_dir.is_dir():
+                from gvm.extensions import _parse_extension_properties
+                for item in ext_ghidra_dir.iterdir():
+                    props: dict[str, str] = {}
+                    if item.is_dir():
+                        pf = item / "extension.properties"
+                        if pf.is_file():
+                            props = _parse_extension_properties(pf)
+                    elif item.is_file() and item.suffix.lower() == ".zip":
+                        try:
+                            with zipfile.ZipFile(item, "r") as zf:
+                                for zi in zf.namelist():
+                                    bn = zi.rsplit("/", 1)[-1] if "/" in zi else zi
+                                    if bn == "extension.properties" and zi.count("/") <= 1:
+                                        raw = zf.read(zi).decode("utf-8", errors="replace")
+                                        for line in raw.splitlines():
+                                            line = line.strip()
+                                            if line and not line.startswith("#") and "=" in line:
+                                                k, _, v = line.partition("=")
+                                                props[k.strip()] = v.strip()
+                                        break
+                        except zipfile.BadZipFile:
+                            continue
+                    name = props.get("name", "")
+                    version = props.get("version", "")
+                    if name and version and not version.startswith("@"):
+                        installed_versions[name.lower()] = version
+
+        # Check each registry extension against its latest GitHub release
+        updates_found: dict[str, str] = {}
+        registry = _load_all_extensions()
+        for ext in registry:
+            ext_name = ext["name"]
+            repo_user = ext.get("repo_user", "")
+            repo_repo = ext.get("repo_repo", "")
+            if not repo_user or not repo_repo:
+                continue
+
+            try:
+                resp = requests.get(
+                    f"https://api.github.com/repos/{repo_user}/{repo_repo}/releases/latest",
+                    headers={"User-Agent": "gvm"},
+                    timeout=15,
+                )
+                if resp.status_code != 200:
+                    continue
+                latest_tag = resp.json().get("tag_name", "")
+                if not latest_tag:
+                    continue
+
+                # Compare: if the extension is installed and the latest tag
+                # differs from the installed version, flag as update available
+                installed_ver = installed_versions.get(ext_name.lower(), "")
+                if installed_ver:
+                    # Normalize for comparison (strip leading 'v')
+                    norm_latest = latest_tag.lstrip("v").strip()
+                    norm_installed = installed_ver.lstrip("v").strip()
+                    if norm_latest != norm_installed:
+                        updates_found[ext_name] = latest_tag
+                else:
+                    # Not installed — check if there's an asset available
+                    # (no update needed, just available for install)
+                    pass
+            except Exception:
+                continue
+
+        # Check local extensions: compare ext_dir versions against installed versions
+        ext_dir_str = self.cacher.cache.prefs.ext_dir
+        if ext_dir_str:
+            ext_dir = Path(ext_dir_str)
+            if ext_dir.is_dir():
+                from gvm.extensions import _scan_ext_dir
+                local_exts = _scan_ext_dir(ext_dir)
+                for local_ext in local_exts:
+                    local_name = local_ext.get("name", "")
+                    local_version = local_ext.get("version", "")
+                    if not local_name or not local_version or local_version.startswith("@"):
+                        continue
+                    installed_ver = installed_versions.get(local_name.lower(), "")
+                    if installed_ver:
+                        norm_local = local_version.lstrip("v").strip()
+                        norm_installed = installed_ver.lstrip("v").strip()
+                        if norm_local != norm_installed:
+                            updates_found[local_name] = local_version
+
+        self._ext_updates = updates_found
+        if updates_found:
+            self._task_queue.put(f"Updates available for {len(updates_found)} extension(s)")
+        else:
+            self._task_queue.put("All extensions are up to date")
+
     def _scan_extensions(self) -> None:
-        """Rescan the extensions directory and refresh the Available list."""
+        """Rescan the extensions directory, register new extensions, and refresh the Available list."""
         ext_dir_str = self.cacher.cache.prefs.ext_dir
         if not ext_dir_str:
             self._set_status("No extensions directory set — configure in Settings tab")
@@ -1162,8 +1483,16 @@ class GVMApp(ctk.CTk):
         if not ext_dir.is_dir():
             self._set_status(f"Directory not found: {ext_dir}")
             return
+
+        # Create .toml registry files for any new extensions not already in the registry
+        from gvm.extensions import register_local_extensions
+        created = register_local_extensions(ext_dir)
+
         self._rebuild_avail_exts()
-        self._set_status(f"Rescanned {ext_dir}")
+        if created:
+            self._set_status(f"Rescanned {ext_dir} — added {created} new extension(s) to registry")
+        else:
+            self._set_status(f"Rescanned {ext_dir}")
 
     def _name_widget(self, parent, text: str, url: str | None):
         """Return a label for *text*; when *url* is set it's a clickable link.

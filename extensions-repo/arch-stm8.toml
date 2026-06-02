@@ -2,7 +2,14 @@ name = "STM-8"
 slug = "arch-stm8"
 repo_user = "esaulenka"
 repo_repo = "ghidra_STM8"
+kind = "ProcessorGit"
+branch_name = "master"
+no_prefix = true
 
-kind="ProcessorGit"
-branch_name="master"
-no_prefix=true
+description = "Ghidra STM8 processor module"
+author = "esaulenka"
+license = "Apache-2.0"
+category = "processor"
+homepage = ""
+asset_pattern = ""
+tags = ["ghidra", "mcu", "reverse-engineering", "stm8"]

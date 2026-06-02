@@ -1,0 +1,17 @@
+name = "GhidraXenon"
+slug = "local-ghidraxenon"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: GhidraXenon"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_12.1_PUBLIC_20260212_GhidraXenon.zip"
+version = "12.1"
+min_ghidra_version = "2025-01-01"

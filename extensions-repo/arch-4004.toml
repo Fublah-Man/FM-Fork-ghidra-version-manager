@@ -2,5 +2,12 @@ name = "4004"
 slug = "arch-4004"
 repo_user = "CUB3D"
 repo_repo = "ghidra-4004"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Intel 4004 architecture for Ghidra"
+author = "CUB3D"
+license = "Apache-2.0"
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_4004.zip"
+tags = []

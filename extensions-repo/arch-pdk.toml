@@ -2,5 +2,12 @@ name = "PDK"
 slug = "arch-pdk"
 repo_user = "CUB3D"
 repo_repo = "ghidra-pdk"
+kind = "ProcessorGit"
 
-kind="ProcessorGit"
+description = "PADAUK processors for Ghidra"
+author = "CUB3D"
+license = "Apache-2.0"
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_PDK.zip"
+tags = ["ghidra-extension", "padauk"]

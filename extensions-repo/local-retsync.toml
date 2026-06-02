@@ -1,0 +1,16 @@
+name = "retsync"
+slug = "local-retsync"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: retsync"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_10.0.3_PUBLIC_20210913_retsync.zip"
+version = "10.0.3"

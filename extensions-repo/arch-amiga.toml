@@ -2,5 +2,12 @@ name = "Amiga"
 slug = "arch-amiga"
 repo_user = "BartmanAbyss"
 repo_repo = "ghidra-amiga"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Ghidra Amiga extension for loading Amiga Hunk executables, Kickstart ROMs, and WinUAE state files"
+author = "BartmanAbyss"
+license = ""
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_ghidra-amiga.zip"
+tags = ["amiga", "ghidra-extension"]

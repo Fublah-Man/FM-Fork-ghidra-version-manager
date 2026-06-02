@@ -113,6 +113,7 @@ def do_update_check(cacher: Cacher, args) -> bool:
     if new_version and getattr(args, "launcher", False):
         try:
             from plyer import notification
+<<<<<<< Updated upstream
             notification.notify(title="New ghidra version available", app_icon="ghidra", timeout=5)
         except ImportError:
             # plyer is an optional extra; absence just means "no notifications".
@@ -120,15 +121,26 @@ def do_update_check(cacher: Cacher, args) -> bool:
         except Exception as e:
             # Any other notification backend failure is non-fatal.
             logger.debug("Failed to send notification: %s", e)
+=======
+            notify = getattr(notification, "notify", None)
+            if callable(notify):
+                notify(title="New ghidra version available", app_icon="ghidra", timeout=5)
+        except Exception:
+            pass
+>>>>>>> Stashed changes
 
     cacher.cache.last_update_check = datetime.now(timezone.utc)
     cacher.save()
     return new_version
 
 
+<<<<<<< Updated upstream
 def _allow_update_check(cmd: str) -> bool:
     # Skip the implicit update check for commands that are purely local/offline
     # or where a network stall would be annoying (locate, list, settings, ...).
+=======
+def _allow_update_check(cmd: str | None) -> bool:
+>>>>>>> Stashed changes
     return cmd not in ("locate", "list", "settings", "prefs", "gui")
 
 

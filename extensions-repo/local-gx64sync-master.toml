@@ -1,0 +1,15 @@
+name = "Gx64Sync-master"
+slug = "local-gx64sync-master"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: Gx64Sync-master"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\Gx64Sync-master.zip"

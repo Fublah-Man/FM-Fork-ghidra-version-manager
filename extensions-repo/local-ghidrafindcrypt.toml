@@ -1,0 +1,17 @@
+name = "GhidraFindcrypt"
+slug = "local-ghidrafindcrypt"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: GhidraFindcrypt"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_12.0.1_PUBLIC_20260117_GhidraFindcrypt.zip"
+version = "12.0.1"
+min_ghidra_version = "2019-03-22"

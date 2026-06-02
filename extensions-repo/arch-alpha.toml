@@ -2,7 +2,14 @@ name = "Alpha"
 slug = "arch-alpha"
 repo_user = "kkaempf"
 repo_repo = "ghidra-alpha"
+kind = "ProcessorGit"
+branch_name = "master"
+no_prefix = true
 
-kind="ProcessorGit"
-branch_name="master"
-no_prefix=true
+description = "A Ghidra processor implementation for the DEC Alpha processor"
+author = "kkaempf"
+license = "Apache-2.0"
+category = "processor"
+homepage = ""
+asset_pattern = ""
+tags = ["alpha", "axp", "dec", "decompiler", "ghidra", "openvms"]

@@ -1,0 +1,17 @@
+name = "CERT Kaiju"
+slug = "local-cert-kaiju"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: CERT Kaiju"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_11.0.3_PUBLIC_20240930_kaiju.zip"
+version = "11.0.3"
+min_ghidra_version = "04/06/2023"

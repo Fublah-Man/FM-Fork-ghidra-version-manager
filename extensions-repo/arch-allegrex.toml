@@ -2,5 +2,12 @@ name = "Allegrex"
 slug = "arch-allegrex"
 repo_user = "kotcrab"
 repo_repo = "ghidra-allegrex"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Ghidra processor module adding support for the Allegrex CPU (PSP)"
+author = "kotcrab"
+license = "Apache-2.0"
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_ghidra-allegrex.zip"
+tags = ["ghidra", "ghidra-extension", "ghidra-plugin", "psp"]

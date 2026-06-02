@@ -1,0 +1,15 @@
+name = "x64dra-master"
+slug = "local-x64dra-master"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: x64dra-master"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\x64dra-master.zip"

@@ -1,0 +1,16 @@
+name = "ghidracord"
+slug = "local-ghidracord"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: ghidracord"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_11.0.2_PUBLIC_20240327_ghidracord.zip"
+version = "11.0.2"

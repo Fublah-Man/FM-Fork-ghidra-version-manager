@@ -1,0 +1,16 @@
+name = "ConsolePatchScripts"
+slug = "local-consolepatchscripts"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: ConsolePatchScripts"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_10.1.2_PUBLIC_20220324_ghidra_ConsolePatchScripts.zip"
+version = "10.1.2"

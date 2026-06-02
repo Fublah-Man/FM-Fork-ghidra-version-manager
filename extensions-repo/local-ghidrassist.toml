@@ -1,0 +1,16 @@
+name = "GhidrAssist"
+slug = "local-ghidrassist"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: GhidrAssist"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_12.0_PUBLIC_20260228_GhidrAssist.zip"
+version = "12.0"

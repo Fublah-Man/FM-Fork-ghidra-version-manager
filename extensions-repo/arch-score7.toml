@@ -2,7 +2,14 @@ name = "sunplus-s-core7"
 slug = "arch-sunplus-score7"
 repo_user = "hyperscandev"
 repo_repo = "ghidra-score7"
+kind = "ProcessorGit"
+branch_name = "master"
+no_prefix = true
 
-kind="ProcessorGit"
-branch_name="master"
-no_prefix=true
+description = "Ghidra Sunplus S+core7 processor module"
+author = "hyperscandev"
+license = ""
+category = "processor"
+homepage = ""
+asset_pattern = ""
+tags = []

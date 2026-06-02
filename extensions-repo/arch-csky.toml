@@ -2,5 +2,12 @@ name = "CSKY"
 slug = "arch-csky"
 repo_user = "taligentx"
 repo_repo = "ghidra_csky_ck804"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "An extended Ghidra processor module for C-SKY-based Winner Micro microcontrollers"
+author = "taligentx"
+license = ""
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_csky_WinnerMicro_*.zip"
+tags = []

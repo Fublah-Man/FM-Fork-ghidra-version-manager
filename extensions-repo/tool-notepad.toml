@@ -2,5 +2,12 @@ name = "MarkdownNotepad"
 slug = "tool-markdownnotepad"
 repo_user = "lr-m"
 repo_repo = "Ghidra-Markdown-Notepad"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "A feature-rich markdown editor plugin for Ghidra that supports collections of notes"
+author = "lr-m"
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_Ghidra-Markdown-Notepad.zip"
+tags = ["ghidra", "ghidra-extension", "ghidra-plugin", "markdown", "notes", "plugin"]

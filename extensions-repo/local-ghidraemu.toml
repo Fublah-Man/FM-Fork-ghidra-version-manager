@@ -1,0 +1,16 @@
+name = "GhidraEmu"
+slug = "local-ghidraemu"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: GhidraEmu"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_11.0_GhidraEmu.zip"
+version = "11.0"

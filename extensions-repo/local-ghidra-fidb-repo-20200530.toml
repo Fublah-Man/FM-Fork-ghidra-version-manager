@@ -1,0 +1,15 @@
+name = "ghidra-fidb-repo_20200530"
+slug = "local-ghidra-fidb-repo-20200530"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: ghidra-fidb-repo_20200530"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra-fidb-repo_20200530.zip"

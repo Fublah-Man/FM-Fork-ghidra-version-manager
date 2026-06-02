@@ -2,5 +2,12 @@ name = "PicoBlaze"
 slug = "arch-picoblaze"
 repo_user = "CUB3D"
 repo_repo = "ghidra-picoblaze"
+kind = "ProcessorGit"
 
-kind="ProcessorGit"
+description = "Xilinx PicoBlaze for Ghidra"
+author = "CUB3D"
+license = "Apache-2.0"
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_PicoBlaze.zip"
+tags = ["ghidra-extension"]

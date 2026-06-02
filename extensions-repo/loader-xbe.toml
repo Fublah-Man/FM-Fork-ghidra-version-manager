@@ -2,5 +2,12 @@ name = "XBE"
 slug = "loader-xbe"
 repo_user = "XboxDev"
 repo_repo = "ghidra-xbe"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Xbox Executable Format (XBE) loader extension for Ghidra"
+author = "XboxDev"
+license = ""
+category = "loader"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_ghidra-xbe.zip"
+tags = ["ghidra", "ghidra-extension", "reverse-engineering", "xbox"]

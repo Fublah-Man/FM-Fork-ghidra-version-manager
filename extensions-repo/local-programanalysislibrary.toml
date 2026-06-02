@@ -1,0 +1,17 @@
+name = "ProgramAnalysisLibrary"
+slug = "local-programanalysislibrary"
+repo_user = ""
+repo_repo = ""
+kind = "Local"
+description = "Locally discovered extension: ProgramAnalysisLibrary"
+author = ""
+license = ""
+category = "tool"
+homepage = ""
+asset_pattern = ""
+tags = [
+    "local",
+]
+local_path = "F:\\Software\\Dev\\Ghidra\\Ghidra_Extensions\\ghidra_9.0_PUBLIC_20190417_ProgramAnalysisLibrary.zip"
+version = "9.0"
+min_ghidra_version = "April 17th, 2019"

@@ -2,5 +2,12 @@ name = "DTB"
 slug = "loader-dtb"
 repo_user = "antoniovazquezblanco"
 repo_repo = "GhidraDeviceTreeBlob"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Import Device Tree Information onto your Ghidra memory map"
+author = "antoniovazquezblanco"
+license = ""
+category = "loader"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_GhidraDeviceTreeBlob.zip"
+tags = ["bootloaders", "device-tree", "devicetree", "dtb", "ghidra", "ghidra-extension", "ghidra-loader", "ghidra-plugin", "kernel", "reverse-engineering"]

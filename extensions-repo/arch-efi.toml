@@ -2,7 +2,14 @@ name = "efi-bytecode"
 slug = "arch-efi"
 repo_user = "meromwolff"
 repo_repo = "Ghidra-EFI-Byte-Code-Processor"
+kind = "ProcessorGit"
+branch_name = "master"
+no_prefix = true
 
-kind="ProcessorGit"
-branch_name="master"
-no_prefix=true
+description = "A Ghidra processor module for the EFI Byte Code (EBC)"
+author = "meromwolff"
+license = "MIT"
+category = "processor"
+homepage = ""
+asset_pattern = ""
+tags = []

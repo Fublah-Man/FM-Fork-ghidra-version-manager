@@ -2,5 +2,12 @@ name = "niosII"
 slug = "arch-nios2"
 repo_user = "jtang613"
 repo_repo = "ghidra_processor_nios_II"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "A Ghidra processor extension for the Altera Nios II"
+author = "jtang613"
+license = ""
+category = "processor"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_ghidra_processor_nios_II.zip"
+tags = ["ghidra", "ghidra-extension", "ghidra-plugin", "ghidra-processor", "nios-ii", "nios2"]

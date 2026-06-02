@@ -2,5 +2,12 @@ name = "Findcrypt"
 slug = "tool-findcrypt"
 repo_user = "antoniovazquezblanco"
 repo_repo = "GhidraFindcrypt"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "Ghidra analysis plugin to locate cryptographic constants"
+author = "antoniovazquezblanco"
+license = "GPL-3.0"
+category = "tool"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_GhidraFindcrypt.zip"
+tags = ["cryptography", "ghidra", "ghidra-analyzer", "ghidra-extension", "reverse-engineering"]

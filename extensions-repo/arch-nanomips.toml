@@ -2,5 +2,12 @@ name = "NanoMips"
 slug = "arch-nanomips"
 repo_user = "nccgroup"
 repo_repo = "ghidra-nanomips"
+kind = "ProcessorGit"
 
-kind="ProcessorGit"
+description = "nanoMIPS module for Ghidra"
+author = "nccgroup"
+license = "GPL-3.0"
+category = "processor"
+homepage = "https://www.nccgroup.com/us/research-blog/ghidra-nanomips-isa-module/"
+asset_pattern = "ghidra_*_PUBLIC_*_nanomips.zip"
+tags = ["ghidra", "ghidra-extension", "ghidra-plugin", "nanomips", "reverse-engineering"]

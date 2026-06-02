@@ -470,7 +470,17 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
                 # Manifest right at the top level.
                 props = _parse_extension_properties(props_file)
                 name = props.get("name", item.name)
+<<<<<<< Updated upstream
                 found.append({"name": name, "path": str(item), "source": "directory"})
+=======
+                found.append({
+                    "name": name, "path": str(item), "source": "directory",
+                    "version": props.get("version", ""),
+                    "createdOn": props.get("createdOn", ""),
+                })
+            # Also check for a manifest at one level deeper (some extensions
+            # extract with a wrapper folder)
+>>>>>>> Stashed changes
             else:
                 # Some extensions extract with a wrapper folder, so look one
                 # level deeper for the manifest too.
@@ -479,7 +489,11 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
                     if sub_props and sub_props.is_file():
                         props = _parse_extension_properties(sub_props)
                         name = props.get("name", sub.name)
-                        found.append({"name": name, "path": str(sub), "source": "directory"})
+                        found.append({
+                            "name": name, "path": str(sub), "source": "directory",
+                            "version": props.get("version", ""),
+                            "createdOn": props.get("createdOn", ""),
+                        })
 
         # --- Case 2: a packed extension .zip ---
         elif item.is_file() and item.suffix.lower() == ".zip":
@@ -507,13 +521,108 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
                     else:
                         # No manifest — fall back to the file name.
                         name = item.stem
+                        props = {}
 
-                    found.append({"name": name, "path": str(item), "source": "zip"})
+                    found.append({
+                        "name": name, "path": str(item), "source": "zip",
+                        "version": props.get("version", ""),
+                        "createdOn": props.get("createdOn", ""),
+                    })
             except zipfile.BadZipFile:
                 # Not actually a valid zip; skip it rather than crash the scan.
                 logger.warning("Skipping invalid zip: %s", item.name)
 
     return found
+
+
+def _generate_slug(name: str, source: str) -> str:
+    """Generate a slug for a local extension based on its name."""
+    base = name.lower().replace(" ", "-").replace("_", "-")
+    # Remove non-alphanumeric characters except hyphens
+    base = "".join(c for c in base if c.isalnum() or c == "-")
+    base = base.strip("-")
+    return f"local-{base}"
+
+
+def _find_toml_by_name(name: str) -> Path | None:
+    """Check if a .toml file already exists for an extension name (case-insensitive)."""
+    for p in EXTENSIONS_REPO.glob("*.toml"):
+        with open(p, "rb") as f:
+            data = tomllib.load(f)
+        if data.get("name", "").lower() == name.lower():
+            return p
+    return None
+
+
+def _create_toml_for_local_ext(ext: dict) -> Path:
+    """Create a .toml registry file for a discovered local extension.
+
+    ext dict is expected to have: name, path, source, version, createdOn
+    Returns the path to the created .toml file.
+    """
+    import tomli_w
+
+    name = ext["name"]
+    slug = _generate_slug(name, ext.get("source", "directory"))
+    filename = f"local-{name.lower().replace(' ', '-').replace('_', '-')}.toml"
+    # Clean filename of special characters
+    filename = "".join(c for c in filename if c.isalnum() or c in "-_.")
+    toml_path = EXTENSIONS_REPO / filename
+
+    data = {
+        "name": name,
+        "slug": slug,
+        "repo_user": "",
+        "repo_repo": "",
+        "kind": "Local",
+        "description": f"Locally discovered extension: {name}",
+        "author": "",
+        "license": "",
+        "category": "tool",
+        "homepage": "",
+        "asset_pattern": "",
+        "tags": ["local"],
+        "local_path": ext["path"],
+    }
+
+    # Include version info if available
+    if ext.get("version"):
+        data["version"] = ext["version"]
+    if ext.get("createdOn"):
+        data["min_ghidra_version"] = ext["createdOn"]
+
+    with open(toml_path, "wb") as f:
+        tomli_w.dump(data, f)
+
+    logger.info("Created registry entry: %s", toml_path)
+    return toml_path
+
+
+def register_local_extensions(ext_dir: Path) -> int:
+    """Scan ext_dir and create .toml registry files for any extensions not already registered.
+
+    Returns the number of new .toml files created.
+    """
+    if not ext_dir.is_dir():
+        return 0
+    found = _scan_ext_dir(ext_dir)
+    created = 0
+
+    for ext in found:
+        name = ext.get("name", "")
+        if not name or name.startswith("@"):
+            continue
+
+        # Check if this extension already has a .toml in the registry
+        existing = _find_toml_by_name(name)
+        if existing:
+            logger.debug("Already in registry: %s (%s)", name, existing.name)
+            continue
+
+        _create_toml_for_local_ext(ext)
+        created += 1
+
+    return created
 
 
 def _ext_scan(cacher: Cacher, args) -> None:

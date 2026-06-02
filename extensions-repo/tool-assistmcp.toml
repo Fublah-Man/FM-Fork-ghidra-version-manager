@@ -2,5 +2,12 @@ name = "AssistMCP"
 slug = "tool-assistmcp"
 repo_user = "jtang613"
 repo_repo = "GhidrAssistMCP"
+kind = "DownloadOnly"
 
-kind="DownloadOnly"
+description = "A native MCP server extension for Ghidra enabling LLM-assisted reverse engineering"
+author = "jtang613"
+license = "MIT"
+category = "tool"
+homepage = ""
+asset_pattern = "ghidra_*_PUBLIC_*_GhidrAssistMCP.zip"
+tags = ["ghidra", "ghidra-extension", "ghidra-plugin", "llm", "mcp", "mcp-server", "reverse-engineering"]
