@@ -8,6 +8,7 @@ ghidra_version_manager.egg-info/entry_points.txt
 ghidra_version_manager.egg-info/requires.txt
 ghidra_version_manager.egg-info/top_level.txt
 gvm/__init__.py
+gvm/__main__.py
 gvm/cache.py
 gvm/extensions.py
 gvm/ghidra_props_parser.py
