@@ -16,11 +16,14 @@ that aren't in the registry (unpacked folders or .zip files containing an
 
 import gzip
 import logging
+import re
 import shutil
+import sys
 import tarfile
 from pathlib import Path
 
 import requests
+import tomli_w
 import tomllib
 
 from gvm.cache import Cacher, ExtEntry
@@ -31,13 +34,140 @@ logger = logging.getLogger(__name__)
 EXTENSIONS_REPO = Path(__file__).parent.parent / "extensions-repo"
 
 
+def _default_gvm_path() -> Path:
+    """GVM's per-user data directory (matches main.py / gui.py)."""
+    home = Path.home()
+    if sys.platform == "win32":
+        return home / "AppData" / "Local" / "gvm"
+    return home / ".local" / "opt" / "gvm"
+
+
+# User-added extensions live here rather than inside the (possibly read-only,
+# reinstall-wiped) bundled package directory. They're loaded alongside the
+# bundled registry so they appear everywhere built-in extensions do.
+USER_EXTENSIONS_REPO = _default_gvm_path() / "extensions-repo"
+
+
 def _load_all_extensions() -> list[dict]:
-    """Load every registry TOML file into a list of dicts (sorted by filename)."""
-    exts = []
-    for p in sorted(EXTENSIONS_REPO.glob("*.toml")):
-        with open(p, "rb") as f:
-            exts.append(tomllib.load(f))
-    return exts
+    """Load every registry TOML into a list of dicts.
+
+    Reads both the bundled registry and the user registry. Bundled entries come
+    first; a user TOML with the same ``slug`` overrides the bundled one so users
+    can customise an entry without editing the package.
+    """
+    exts: dict[str, dict] = {}
+    sources = [EXTENSIONS_REPO]
+    if USER_EXTENSIONS_REPO.is_dir():
+        sources.append(USER_EXTENSIONS_REPO)
+    for repo in sources:
+        for p in sorted(repo.glob("*.toml")):
+            with open(p, "rb") as f:
+                ext = tomllib.load(f)
+            # Key by slug (falling back to name) so user entries can override.
+            exts[ext.get("slug", ext.get("name", p.stem))] = ext
+    return list(exts.values())
+
+
+def parse_git_url(url: str) -> tuple[str, str]:
+    """Parse a GitHub repo URL into ``(owner, repo)``.
+
+    Accepts the common forms, e.g.::
+
+        https://github.com/owner/repo
+        https://github.com/owner/repo.git
+        http://github.com/owner/repo/
+        git@github.com:owner/repo.git
+
+    Raises ``ValueError`` for anything that doesn't look like an owner/repo pair.
+    """
+    s = url.strip()
+    # Normalise the scp-style SSH form (git@host:owner/repo) to just its path.
+    m = re.match(r"^git@[^:]+:(?P<path>.+)$", s)
+    if m:
+        path = m.group("path")
+    else:
+        # Strip any URL scheme (https://, http://, git://, ssh://, ...).
+        path = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", "", s)
+        # If the leading segment looks like a hostname (has a dot, e.g.
+        # "github.com"), drop it so only the owner/repo path remains.
+        first = path.split("/", 1)[0]
+        if "." in first:
+            path = path.split("/", 1)[1] if "/" in path else ""
+    # Drop a trailing ".git" and surrounding slashes, then take the first two
+    # path segments as owner/repo (ignoring extras like /tree/main).
+    path = path.strip("/")
+    if path.endswith(".git"):
+        path = path[: -len(".git")]
+    parts = [p for p in path.split("/") if p]
+    if len(parts) < 2:
+        raise ValueError(f"Not a valid git repository URL: {url}")
+    return parts[0], parts[1]
+
+
+def add_extension_from_url(url: str, kind: str, name: str | None = None) -> dict:
+    """Create a user-registry TOML for a git repo and return the entry dict.
+
+    *kind* must be ``"DownloadOnly"`` or ``"ProcessorGit"``. The display *name*
+    defaults to the repo name. The TOML is written into ``USER_EXTENSIONS_REPO``
+    with a collision-safe slug so it can't clash with a bundled entry.
+    """
+    if kind not in ("DownloadOnly", "ProcessorGit"):
+        raise ValueError(f"Unknown extension kind: {kind}")
+
+    owner, repo = parse_git_url(url)
+    display_name = name or repo
+    # Namespaced slug keeps user entries distinct from bundled ones.
+    slug = f"user-{owner}-{repo}".lower()
+
+    entry = {
+        "name": display_name,
+        "slug": slug,
+        "repo_user": owner,
+        "repo_repo": repo,
+        "kind": kind,
+    }
+
+    USER_EXTENSIONS_REPO.mkdir(parents=True, exist_ok=True)
+    toml_path = USER_EXTENSIONS_REPO / f"{slug}.toml"
+    with open(toml_path, "wb") as f:
+        f.write(tomli_w.dumps(entry).encode("utf-8"))
+    logger.info("Added extension '%s' -> %s", display_name, toml_path)
+    return entry
+
+
+def repo_url_for(ext: dict) -> str | None:
+    """Return the GitHub web URL for a registry extension, or None if unknown."""
+    user = ext.get("repo_user")
+    repo = ext.get("repo_repo")
+    if user and repo:
+        return f"https://github.com/{user}/{repo}"
+    return None
+
+
+def scan_installed_extensions(install_path: Path) -> list[dict]:
+    """List extensions physically installed in ``Ghidra/Extensions``.
+
+    Returns ``{name, source}`` dicts (source is always "extension"). We
+    deliberately do *not* enumerate ``Ghidra/Processors`` here — Ghidra ships
+    100+ built-in processors and listing them all would bury the user's actual
+    additions. ProcessorGit extensions are instead surfaced by the caller from
+    the GVM cache (which records exactly what it added).
+    """
+    base = Path(install_path)
+    found: list[dict] = []
+
+    ext_dir = base / "Ghidra" / "Extensions"
+    if ext_dir.is_dir():
+        for item in sorted(ext_dir.iterdir()):
+            if not item.is_dir():
+                continue
+            props_file = item / "extension.properties"
+            if not props_file.is_file():
+                continue
+            props = _parse_extension_properties(props_file)
+            found.append({"name": props.get("name", item.name), "source": "extension"})
+
+    return found
 
 
 def find_by_name(name: str) -> dict:
