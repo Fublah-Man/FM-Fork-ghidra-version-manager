@@ -507,14 +507,12 @@ class GVMApp(ctk.CTk):
         self._opt_ext_ver = ctk.CTkOptionMenu(top, variable=self._ext_ver_var, values=["(none)"], width=220,
                                               command=lambda _: self._refresh_installed_exts())
         self._opt_ext_ver.pack(side="left")
-<<<<<<< Updated upstream
+        # Right-aligned toolbar (first packed sits rightmost): scanning + adding
+        # from a git URL (merged) plus extension update-checking (local work).
         ctk.CTkButton(top, text="Scan Ext Dir", width=120, command=self._scan_extensions).pack(side="right")
         ctk.CTkButton(top, text="Add from git url", width=140, command=self._add_extension_dialog).pack(side="right", padx=(0, 6))
-=======
-        ctk.CTkButton(top, text="Check For Updates", width=140, command=self._check_ext_updates).pack(side="right")
+        ctk.CTkButton(top, text="Check For Updates", width=140, command=self._check_ext_updates).pack(side="right", padx=(0, 6))
         ctk.CTkButton(top, text="Scan Installed Ext", width=140, command=self._refresh_installed_exts).pack(side="right", padx=(0, 6))
-        ctk.CTkButton(top, text="Scan Ext Dir", width=120, command=self._scan_extensions).pack(side="right", padx=(0, 6))
->>>>>>> Stashed changes
 
         # Left: available extensions
         left_label = ctk.CTkLabel(tab, text="Available Extensions", font=ctk.CTkFont(size=14, weight="bold"))
@@ -558,32 +556,8 @@ class GVMApp(ctk.CTk):
             w.destroy()
         self._ext_avail_widgets.clear()
 
-<<<<<<< Updated upstream
         from gvm.extensions import repo_url_for
 
-        idx = 0
-        # Built-in + user-added registry extensions
-        for ext in _load_all_extensions():
-            row = ctk.CTkFrame(self._ext_avail_scroll)
-            row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
-            row.grid_columnconfigure(0, weight=1)
-
-            kind_short = "DL" if ext.get("kind", "DownloadOnly") == "DownloadOnly" else "Git"
-            # The name is a clickable link that opens the repo in a browser.
-            self._name_widget(row, ext["name"], repo_url_for(ext)).grid(
-                row=0, column=0, padx=8, pady=4, sticky="w"
-            )
-            ctk.CTkLabel(row, text=kind_short, text_color=_CLR_MUTED, font=ctk.CTkFont(size=11)).grid(
-                row=0, column=1, padx=4
-            )
-            ctk.CTkButton(
-                row, text="Install", width=70,
-                command=lambda n=ext["name"]: self._install_extension(n),
-            ).grid(row=0, column=2, padx=6, pady=3)
-
-            self._ext_avail_widgets.append(row)
-            idx += 1
-=======
         # Build a merged list: registry extensions + local extensions, deduplicated by name
         # Each merged entry is a dict with unified keys for rendering
         merged: dict[str, dict] = {}  # keyed by lowercase name
@@ -608,7 +582,6 @@ class GVMApp(ctk.CTk):
                 "registry_ext": ext,
                 "local_ext": None,
             }
->>>>>>> Stashed changes
 
         # Local extensions from the configured extensions directory
         ext_dir_str = self.cacher.cache.prefs.ext_dir
@@ -648,8 +621,10 @@ class GVMApp(ctk.CTk):
             row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
 
-            # Row 0: name + tag + buttons
-            ctk.CTkLabel(row, text=entry["name"], anchor="w", font=ctk.CTkFont(size=13)).grid(
+            # Row 0: name + tag + buttons. The name is a clickable link to the
+            # repo when we know it (registry entries carry repo_user/repo_repo).
+            link_url = repo_url_for(entry["registry_ext"]) if entry["registry_ext"] else None
+            self._name_widget(row, entry["name"], link_url).grid(
                 row=0, column=0, padx=8, pady=(4, 0), sticky="w"
             )
             ctk.CTkLabel(
@@ -711,11 +686,12 @@ class GVMApp(ctk.CTk):
         """Populate the Installed panel for the selected version.
 
         Combines two views so nothing is hidden:
-          * what's *physically* present in the install (scanning both
-            ``Ghidra/Extensions`` and ``Ghidra/Processors``), and
-          * what GVM *recorded* in its cache — notably DownloadOnly extensions
-            that were fetched but not yet installed through Ghidra's UI.
-        Each row is tagged with its state so the two are distinguishable.
+          * what's *physically* present in the install (scanning the Extensions
+            directory for unpacked folders and ``.zip`` bundles), shown with its
+            version/Ghidra-compat info and an Uninstall button, and
+          * what GVM *recorded* in its cache but that isn't physically present —
+            notably DownloadOnly assets that still need installing through
+            Ghidra's "File -> Install Extensions" dialog.
         """
         for w in self._ext_inst_widgets:
             w.destroy()
@@ -725,114 +701,105 @@ class GVMApp(ctk.CTk):
         if not ver or ver == "(none)" or ver not in self.cacher.cache.entries:
             return
 
-        from gvm.extensions import scan_installed_extensions, _load_all_extensions
+        from gvm.extensions import _load_all_extensions, _parse_extension_properties
 
         entry = self.cacher.cache.entries[ver]
-<<<<<<< Updated upstream
-
-        # (display_name -> (state_label, color)) rows, de-duplicated by name.
-        rows: dict[str, tuple[str, str]] = {}
-
-        # 1. Extensions physically present in Ghidra/Extensions.
-        for found in scan_installed_extensions(Path(entry.path)):
-            rows[found["name"]] = ("installed", _CLR_INSTALLED)
-
-        # 2. Extensions GVM recorded for this version. Use the registry to map
-        #    slug -> (name, kind); ProcessorGit ones are unpacked into the
-        #    install (so "processor"), DownloadOnly ones were only fetched.
-        registry = {e.get("slug"): e for e in _load_all_extensions()}
-        for slug in entry.extensions:
-            reg = registry.get(slug, {})
-            name = reg.get("name", slug)
-            if name in rows:
-                continue  # already shown as physically installed
-            if reg.get("kind") == "ProcessorGit":
-                rows[name] = ("processor", _CLR_INSTALLED)
-            else:
-                rows[name] = ("downloaded, not yet installed", _CLR_MUTED)
-
-        if not rows:
-            return
-
-        for idx, (display_name, (state, color)) in enumerate(sorted(rows.items())):
-=======
-        ext_ghidra_dir = Path(entry.path) / "Extensions" / "Ghidra"
-        if not ext_ghidra_dir.is_dir():
-            return
 
         import zipfile
-        from gvm.extensions import _parse_extension_properties
 
         idx = 0
-        for item in sorted(ext_ghidra_dir.iterdir()):
-            props: dict[str, str] = {}
-            if item.is_dir():
-                props_file = item / "extension.properties"
-                if not props_file.is_file():
-                    continue
-                props = _parse_extension_properties(props_file)
-            elif item.is_file() and item.suffix.lower() == ".zip":
-                try:
-                    with zipfile.ZipFile(item, "r") as zf:
-                        props_entry = None
-                        for zi in zf.namelist():
-                            basename = zi.rsplit("/", 1)[-1] if "/" in zi else zi
-                            if basename == "extension.properties" and zi.count("/") <= 1:
-                                props_entry = zi
-                                break
-                        if props_entry:
-                            raw = zf.read(props_entry).decode("utf-8", errors="replace")
-                            for line in raw.splitlines():
-                                line = line.strip()
-                                if line and not line.startswith("#") and "=" in line:
-                                    k, _, v = line.partition("=")
-                                    props[k.strip()] = v.strip()
-                        else:
-                            continue
-                except zipfile.BadZipFile:
-                    continue
-            else:
-                continue
+        present_names: set[str] = set()  # lowercased names that are physically installed
 
-            # Skip template/placeholder entries (unresolved @variables@)
-            display_name = props.get("name", item.stem)
-            if display_name.startswith("@") and display_name.endswith("@"):
-                continue
+        # 1. Extensions physically present in the install (unpacked dirs + .zip bundles).
+        ext_ghidra_dir = Path(entry.path) / "Extensions" / "Ghidra"
+        if ext_ghidra_dir.is_dir():
+            for item in sorted(ext_ghidra_dir.iterdir()):
+                props: dict[str, str] = {}
+                if item.is_dir():
+                    props_file = item / "extension.properties"
+                    if not props_file.is_file():
+                        continue
+                    props = _parse_extension_properties(props_file)
+                elif item.is_file() and item.suffix.lower() == ".zip":
+                    try:
+                        with zipfile.ZipFile(item, "r") as zf:
+                            props_entry = None
+                            for zi in zf.namelist():
+                                basename = zi.rsplit("/", 1)[-1] if "/" in zi else zi
+                                if basename == "extension.properties" and zi.count("/") <= 1:
+                                    props_entry = zi
+                                    break
+                            if props_entry:
+                                raw = zf.read(props_entry).decode("utf-8", errors="replace")
+                                for line in raw.splitlines():
+                                    line = line.strip()
+                                    if line and not line.startswith("#") and "=" in line:
+                                        k, _, v = line.partition("=")
+                                        props[k.strip()] = v.strip()
+                            else:
+                                continue
+                    except zipfile.BadZipFile:
+                        continue
+                else:
+                    continue
 
->>>>>>> Stashed changes
+                # Skip template/placeholder entries (unresolved @variables@)
+                display_name = props.get("name", item.stem)
+                if display_name.startswith("@") and display_name.endswith("@"):
+                    continue
+                present_names.add(display_name.lower())
+
+                row = ctk.CTkFrame(self._ext_inst_scroll)
+                row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
+                row.grid_columnconfigure(0, weight=1)
+
+                ctk.CTkLabel(row, text=display_name, anchor="w", font=ctk.CTkFont(size=13)).grid(
+                    row=0, column=0, padx=8, pady=(4, 0), sticky="w"
+                )
+
+                # Version and Ghidra compatibility
+                info_parts: list[str] = []
+                ext_ver = props.get("version", "")
+                ext_compat = props.get("createdOn", "")
+                if ext_ver and not ext_ver.startswith("@"):
+                    info_parts.append(f"v{ext_ver}")
+                if ext_compat and not ext_compat.startswith("@"):
+                    info_parts.append(f"for Ghidra {ext_compat}")
+                if info_parts:
+                    ctk.CTkLabel(
+                        row, text="  •  ".join(info_parts), text_color=_CLR_MUTED,
+                        font=ctk.CTkFont(size=11), anchor="w",
+                    ).grid(row=1, column=0, padx=10, pady=(0, 4), sticky="w")
+
+                # Uninstall button
+                ctk.CTkButton(
+                    row, text="Uninstall", width=70, height=26,
+                    fg_color=_CLR_DANGER, hover_color="#c9302c",
+                    command=lambda p=item: self._uninstall_installed_ext(p),
+                ).grid(row=0, column=1, rowspan=2, padx=6, pady=3, sticky="e")
+
+                self._ext_inst_widgets.append(row)
+                idx += 1
+
+        # 2. Extensions GVM recorded for this version but not physically present —
+        #    typically DownloadOnly assets awaiting manual install via Ghidra.
+        registry = {e.get("slug"): e for e in _load_all_extensions()}
+        for slug in entry.extensions:
+            name = registry.get(slug, {}).get("name", slug)
+            if name.lower() in present_names:
+                continue
             row = ctk.CTkFrame(self._ext_inst_scroll)
             row.grid(row=idx, column=0, sticky="ew", pady=1, padx=2)
             row.grid_columnconfigure(0, weight=1)
-
-            ctk.CTkLabel(row, text=display_name, anchor="w", font=ctk.CTkFont(size=13)).grid(
-                row=0, column=0, padx=8, pady=(4, 0), sticky="w"
+            ctk.CTkLabel(row, text=name, anchor="w", font=ctk.CTkFont(size=13)).grid(
+                row=0, column=0, padx=8, pady=4, sticky="w"
             )
-            ctk.CTkLabel(row, text=state, text_color=color, font=ctk.CTkFont(size=11)).grid(
-                row=0, column=1, padx=6, pady=4, sticky="e"
-            )
-
-            # Version and Ghidra compatibility
-            info_parts: list[str] = []
-            ext_ver = props.get("version", "")
-            ext_compat = props.get("createdOn", "")
-            if ext_ver and not ext_ver.startswith("@"):
-                info_parts.append(f"v{ext_ver}")
-            if ext_compat and not ext_compat.startswith("@"):
-                info_parts.append(f"for Ghidra {ext_compat}")
-            if info_parts:
-                ctk.CTkLabel(
-                    row, text="  •  ".join(info_parts), text_color=_CLR_MUTED,
-                    font=ctk.CTkFont(size=11), anchor="w",
-                ).grid(row=1, column=0, padx=10, pady=(0, 4), sticky="w")
-
-            # Uninstall button
-            ctk.CTkButton(
-                row, text="Uninstall", width=70, height=26,
-                fg_color=_CLR_DANGER, hover_color="#c9302c",
-                command=lambda p=item: self._uninstall_installed_ext(p),
-            ).grid(row=0, column=1, rowspan=2, padx=6, pady=3, sticky="e")
-
+            ctk.CTkLabel(
+                row, text="downloaded, not yet installed", text_color=_CLR_MUTED,
+                font=ctk.CTkFont(size=11),
+            ).grid(row=0, column=1, padx=6, pady=4, sticky="e")
             self._ext_inst_widgets.append(row)
+            idx += 1
 
     # ------------------------------------------------------------------
     # Settings tab
@@ -981,12 +948,8 @@ class GVMApp(ctk.CTk):
                     self._set_status(f"New version available: {tag}")
                     self._prompt_update(tag)
                 else:
-<<<<<<< Updated upstream
                     # Plain string: just a status-bar update.
                     self._set_status(msg)
-=======
-                    self._set_status(msg is not None and str(msg) or "")
->>>>>>> Stashed changes
         except queue.Empty:
             # Nothing left to process this tick.
             pass

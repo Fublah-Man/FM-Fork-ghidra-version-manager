@@ -470,17 +470,11 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
                 # Manifest right at the top level.
                 props = _parse_extension_properties(props_file)
                 name = props.get("name", item.name)
-<<<<<<< Updated upstream
-                found.append({"name": name, "path": str(item), "source": "directory"})
-=======
                 found.append({
                     "name": name, "path": str(item), "source": "directory",
                     "version": props.get("version", ""),
                     "createdOn": props.get("createdOn", ""),
                 })
-            # Also check for a manifest at one level deeper (some extensions
-            # extract with a wrapper folder)
->>>>>>> Stashed changes
             else:
                 # Some extensions extract with a wrapper folder, so look one
                 # level deeper for the manifest too.
