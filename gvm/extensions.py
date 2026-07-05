@@ -612,12 +612,20 @@ def _generate_slug(name: str, source: str) -> str:
 
 
 def _find_toml_by_name(name: str) -> Path | None:
-    """Check if a .toml file already exists for an extension name (case-insensitive)."""
-    for p in EXTENSIONS_REPO.glob("*.toml"):
-        with open(p, "rb") as f:
-            data = tomllib.load(f)
-        if data.get("name", "").lower() == name.lower():
-            return p
+    """Check if a .toml file already exists for an extension name.
+
+    Scans both the bundled registry and the user registry (case-insensitive), so
+    an entry already recorded in either location is detected.
+    """
+    repos = [EXTENSIONS_REPO]
+    if USER_EXTENSIONS_REPO.is_dir():
+        repos.append(USER_EXTENSIONS_REPO)
+    for repo in repos:
+        for p in repo.glob("*.toml"):
+            with open(p, "rb") as f:
+                data = tomllib.load(f)
+            if data.get("name", "").lower() == name.lower():
+                return p
     return None
 
 
@@ -625,16 +633,18 @@ def _create_toml_for_local_ext(ext: dict) -> Path:
     """Create a .toml registry file for a discovered local extension.
 
     ext dict is expected to have: name, path, source, version, createdOn
-    Returns the path to the created .toml file.
+    Returns the path to the created .toml file. Written into
+    ``USER_EXTENSIONS_REPO`` (never the bundled package dir, which is read-only
+    on installed packages and wiped on reinstall).
     """
     import tomli_w
 
     name = ext["name"]
     slug = _generate_slug(name, ext.get("source", "directory"))
-    filename = f"local-{name.lower().replace(' ', '-').replace('_', '-')}.toml"
-    # Clean filename of special characters
-    filename = "".join(c for c in filename if c.isalnum() or c in "-_.")
-    toml_path = EXTENSIONS_REPO / filename
+    # Derive the filename from the (already-sanitized) slug so it can't clash
+    # with a bundled entry and can't contain unsafe characters.
+    USER_EXTENSIONS_REPO.mkdir(parents=True, exist_ok=True)
+    toml_path = USER_EXTENSIONS_REPO / f"{slug}.toml"
 
     data = {
         "name": name,
