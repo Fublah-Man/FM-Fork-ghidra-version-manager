@@ -284,6 +284,58 @@ def _ext_install(cacher: Cacher, path: Path, args) -> None:
         _install_download_only(cacher, path, entry, ghidra_version)
     elif kind == "ProcessorGit":
         _install_processor_git(cacher, path, entry, ghidra_version)
+    elif kind == "Local":
+        local_path = entry.get("local_path", "")
+        if not local_path or not Path(local_path).exists():
+            logger.error("Local source not found: %s", local_path or "(no local_path set)")
+            return
+        dest_dir = Path(ghidra_ent.path) / "Ghidra" / "Extensions"
+        try:
+            root = install_local_source(Path(local_path), dest_dir)
+        except FileExistsError:
+            logger.error("That extension is already installed")
+            return
+        ghidra_ent.extensions[entry["slug"]] = ExtEntry(files=[str(dest_dir / root)])
+        cacher.save()
+        logger.info("Installed %s", entry["name"])
+    else:
+        logger.error("Unknown extension kind: %s", kind)
+
+
+def install_local_source(src: Path, dest_dir: Path, overwrite: bool = False) -> str:
+    """Install a local extension *src* (a directory or ``.zip``) into *dest_dir*.
+
+    Zips are **unpacked** (Ghidra loads unpacked extension folders under
+    ``Ghidra/Extensions``, not loose archives). Returns the installed folder
+    name. Raises ``FileExistsError`` when the target exists and *overwrite* is
+    False. Shared by the CLI and the GUI.
+    """
+    from gvm.install import _safe_extract_zip
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    if src.is_dir():
+        root = src.name
+    elif src.suffix.lower() == ".zip":
+        import zipfile
+        with zipfile.ZipFile(src) as zf:
+            roots = {n.split("/", 1)[0] for n in zf.namelist() if n.strip("/")}
+        root = next(iter(roots)) if len(roots) == 1 else src.stem
+    else:
+        root = src.name
+
+    target = dest_dir / root
+    if target.exists():
+        if not overwrite:
+            raise FileExistsError(root)
+        shutil.rmtree(target, ignore_errors=True) if target.is_dir() else target.unlink()
+
+    if src.is_dir():
+        shutil.copytree(str(src), str(target))
+    elif src.suffix.lower() == ".zip":
+        _safe_extract_zip(src, dest_dir)
+    else:
+        shutil.copy2(str(src), str(target))
+    return root
 
 
 def _select_asset(assets: list[dict], asset_pattern: str) -> dict:
@@ -346,9 +398,10 @@ def _install_download_only(
     )
     logger.info("%s", dl_path)
 
-    # Record the downloaded file so uninstall can clean it up later.
+    # Record the downloaded file (for uninstall) and the release tag (so the GUI
+    # can later tell whether a newer release is available).
     cacher.cache.entries[ghidra_version].extensions[entry["slug"]] = ExtEntry(
-        files=[str(dl_path)]
+        files=[str(dl_path)], tag=rel.get("tag_name", "")
     )
     cacher.save()
 

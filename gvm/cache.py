@@ -35,15 +35,22 @@ class ExtEntry:
 
     # Absolute paths of every file (or directory) this extension installed.
     files: list[str] = field(default_factory=list)
+    # The upstream release tag this was installed from, when known. Used to tell
+    # whether a newer release is available (compared tag-to-tag). Empty for
+    # extensions installed before this was tracked.
+    tag: str = ""
 
     def to_dict(self) -> dict:
         # Serialise to the shape stored in the TOML file.
-        return {"files": self.files}
+        d: dict = {"files": self.files}
+        if self.tag:
+            d["tag"] = self.tag
+        return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "ExtEntry":
         # Rebuild from TOML data; tolerate a missing "files" key (old caches).
-        return cls(files=d.get("files", []))
+        return cls(files=d.get("files", []), tag=d.get("tag", ""))
 
 
 @dataclass
