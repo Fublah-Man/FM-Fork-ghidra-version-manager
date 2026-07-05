@@ -20,7 +20,7 @@ import re
 import shutil
 import sys
 import tarfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import requests
 import tomli_w
@@ -32,6 +32,57 @@ logger = logging.getLogger(__name__)
 
 # The bundled registry of known extensions (one TOML file per extension).
 EXTENSIONS_REPO = Path(__file__).parent.parent / "extensions-repo"
+
+# Upper bound on a single downloaded asset/tarball. Guards against a malicious
+# (user-added) extension repo serving an unbounded/zip-bomb payload. Ghidra
+# extensions are a few MB; 2 GiB is far above any legitimate case.
+MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
+
+# GitHub owner/repo names allow only these characters. We validate against this
+# before interpolating them into API URLs or filesystem paths.
+_GH_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _safe_child(base: Path, untrusted_name: str) -> Path:
+    """Return ``base / <leaf of untrusted_name>``, refusing directory escapes.
+
+    Only the final path component of *untrusted_name* is used (embedded ``/``,
+    ``\\`` and ``..`` are stripped), then the result is asserted to stay inside
+    *base*. Use this whenever an attacker-influenced string (e.g. a GitHub
+    release asset name) is turned into an output path. Raises ``ValueError`` on
+    anything unsafe.
+    """
+    leaf = PurePosixPath(str(untrusted_name).replace("\\", "/")).name
+    if not leaf or leaf in (".", ".."):
+        raise ValueError(f"Unsafe filename: {untrusted_name!r}")
+    candidate = (base / leaf).resolve()
+    if not candidate.is_relative_to(base.resolve()):
+        raise ValueError(f"Path escapes target directory: {untrusted_name!r}")
+    return candidate
+
+
+def _stream_to_file(dl_resp, dl_path: Path, total: int | None) -> None:
+    """Stream an HTTP response body to *dl_path* with a progress bar + size cap.
+
+    Enforces ``MAX_DOWNLOAD_BYTES`` and removes the partial file on any error so
+    a failed/oversized download never leaves a corrupt or huge artifact behind.
+    """
+    from tqdm import tqdm
+
+    written = 0
+    try:
+        with open(dl_path, "wb") as f, tqdm(total=total, unit="B", unit_scale=True) as pbar:
+            for chunk in dl_resp.iter_content(chunk_size=65536):
+                written += len(chunk)
+                if written > MAX_DOWNLOAD_BYTES:
+                    raise RuntimeError(
+                        f"Download exceeded {MAX_DOWNLOAD_BYTES} bytes; aborting"
+                    )
+                f.write(chunk)
+                pbar.update(len(chunk))
+    except Exception:
+        dl_path.unlink(missing_ok=True)
+        raise
 
 
 def _default_gvm_path() -> Path:
@@ -101,7 +152,13 @@ def parse_git_url(url: str) -> tuple[str, str]:
     parts = [p for p in path.split("/") if p]
     if len(parts) < 2:
         raise ValueError(f"Not a valid git repository URL: {url}")
-    return parts[0], parts[1]
+    owner, repo = parts[0], parts[1]
+    # Reject anything that isn't a plain GitHub name — this stops path separators
+    # ("..", "\") and URL metacharacters from later reaching a filesystem path or
+    # an API URL (the slug/TOML filename and the api.github.com f-strings).
+    if not _GH_NAME_RE.match(owner) or not _GH_NAME_RE.match(repo):
+        raise ValueError(f"Not a valid git repository URL: {url}")
+    return owner, repo
 
 
 def add_extension_from_url(url: str, kind: str, name: str | None = None) -> dict:
@@ -229,6 +286,29 @@ def _ext_install(cacher: Cacher, path: Path, args) -> None:
         _install_processor_git(cacher, path, entry, ghidra_version)
 
 
+def _select_asset(assets: list[dict], asset_pattern: str) -> dict:
+    """Pick the release asset to download.
+
+    Honors the registry's ``asset_pattern`` glob (e.g.
+    ``ghidra_*_PUBLIC_*_nanomips.zip``) when set, so multi-asset releases fetch
+    the intended file instead of a blind first asset. Falls back to the first
+    asset when no pattern is given or nothing matches. Raises if there are none.
+    """
+    import fnmatch
+
+    if not assets:
+        raise RuntimeError("This release doesn't have an asset attached")
+    if asset_pattern:
+        for a in assets:
+            if fnmatch.fnmatch(a.get("name", ""), asset_pattern):
+                return a
+        logger.warning(
+            "No asset matched pattern %r; falling back to the first asset",
+            asset_pattern,
+        )
+    return assets[0]
+
+
 def _install_download_only(
     cacher: Cacher, path: Path, entry: dict, ghidra_version: str
 ) -> None:
@@ -239,35 +319,25 @@ def _install_download_only(
     rel_resp = requests.get(
         f"https://api.github.com/repos/{entry['repo_user']}/{entry['repo_repo']}/releases/latest",
         headers={"User-Agent": "gvm"},
+        timeout=30,
     )
     rel_resp.raise_for_status()
     rel = rel_resp.json()
 
-    assets = rel.get("assets", [])
-    if not assets:
-        raise RuntimeError("This tag doesn't have an asset attached")
-    asset = assets[0]
+    asset = _select_asset(rel.get("assets", []), entry.get("asset_pattern", ""))
     url = asset["browser_download_url"]
     asset_name = asset["name"]
     asset_size = asset.get("size", 0)
 
     logger.info("Downloading: %s -> %s", url, asset_name)
-    dl_path = path / asset_name
+    # asset_name comes from the (possibly attacker-controlled) release JSON, so
+    # never trust it as a path — keep only its basename and confirm containment.
+    dl_path = _safe_child(path, asset_name)
     logger.info("Saving to: %s", dl_path)
 
-    from tqdm import tqdm
     dl_resp = requests.get(url, stream=True, timeout=300)
     dl_resp.raise_for_status()
-    # Stream to disk with a progress bar; remove the partial file on any error
-    # so a failed download doesn't leave a corrupt asset lying around.
-    try:
-        with open(dl_path, "wb") as f, tqdm(total=asset_size, unit="B", unit_scale=True) as pbar:
-            for chunk in dl_resp.iter_content(chunk_size=65536):
-                f.write(chunk)
-                pbar.update(len(chunk))
-    except Exception:
-        dl_path.unlink(missing_ok=True)
-        raise
+    _stream_to_file(dl_resp, dl_path, asset_size or None)
 
     # DownloadOnly extensions can't be auto-installed; point the user at the dialog.
     logger.info(
@@ -299,7 +369,6 @@ def _install_processor_git(
     dl_path = path / f"{entry['slug']}.tar.gz"
     logger.info("Saving to: %s", dl_path)
 
-    from tqdm import tqdm
     dl_resp = requests.get(
         url,
         stream=True,
@@ -308,17 +377,10 @@ def _install_processor_git(
     )
     dl_resp.raise_for_status()
     # The tarball endpoint usually omits Content-Length, so derive a total when
-    # available and fall back to an unbounded bar otherwise. Clean up the partial
-    # file if the stream fails midway.
+    # available and fall back to an unbounded bar otherwise. The shared streamer
+    # enforces the size cap and cleans up a partial file on failure.
     total = int(dl_resp.headers.get("content-length", 0)) or None
-    try:
-        with open(dl_path, "wb") as f, tqdm(total=total, unit="B", unit_scale=True) as pbar:
-            for chunk in dl_resp.iter_content(chunk_size=65536):
-                f.write(chunk)
-                pbar.update(len(chunk))
-    except Exception:
-        dl_path.unlink(missing_ok=True)
-        raise
+    _stream_to_file(dl_resp, dl_path, total)
 
     logger.info("Download done")
 
@@ -327,13 +389,18 @@ def _install_processor_git(
     if cache_ent is None:
         raise RuntimeError(f"Version {ghidra_version} isn't known")
 
-    # Processor modules live under Ghidra/Processors/<name>.
-    base = Path(cache_ent.path) / "Ghidra" / "Processors"
-    ext_entry = ExtEntry(files=[str(base / entry["name"])])
-    logger.info("files: %s", ext_entry.files)
-
     no_prefix = entry.get("no_prefix", False)
     ext_name = entry["name"]
+    # The module directory name comes from the registry entry; a hand-edited TOML
+    # could smuggle separators/".." here and relocate dest_root outside
+    # Ghidra/Processors, so validate it's a plain single path component.
+    if ext_name in (".", "..") or "/" in ext_name or "\\" in ext_name:
+        raise ValueError(f"Unsafe extension name: {ext_name!r}")
+
+    # Processor modules live under Ghidra/Processors/<name>.
+    base = Path(cache_ent.path) / "Ghidra" / "Processors"
+    ext_entry = ExtEntry(files=[str(base / ext_name)])
+    logger.info("files: %s", ext_entry.files)
 
     # Where extracted files are allowed to land; used for the traversal check.
     dest_root = (base / ext_name).resolve()
@@ -341,6 +408,7 @@ def _install_processor_git(
     # GitHub tarballs wrap everything in a top-level "<user>-<repo>-<sha>/"
     # directory. We detect that prefix from the first entry, then strip it from
     # every member so files land directly under base/ext_name.
+    extracted_bytes = 0
     with gzip.open(dl_path, "rb") as gz_f:
         # mode="r|" = streaming read of a non-seekable gzip stream.
         with tarfile.open(fileobj=gz_f, mode="r|") as tar:
@@ -380,10 +448,15 @@ def _install_processor_git(
 
                 out_path.parent.mkdir(parents=True, exist_ok=True)
 
-                # Stream the member's bytes out to disk.
+                # Stream the member's bytes out to disk, bounding the total
+                # uncompressed size to guard against a tar bomb.
                 f_obj = tar.extractfile(member)
                 if f_obj is not None:
-                    out_path.write_bytes(f_obj.read())
+                    data = f_obj.read()
+                    extracted_bytes += len(data)
+                    if extracted_bytes > MAX_DOWNLOAD_BYTES:
+                        raise RuntimeError("Archive expands beyond the size limit; aborting")
+                    out_path.write_bytes(data)
                     logger.info("%s", out_path)
                     ext_entry.files.append(str(out_path))
 

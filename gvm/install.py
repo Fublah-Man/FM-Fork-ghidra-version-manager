@@ -24,6 +24,10 @@ from gvm.ghidra_props_parser import GhidraPropsFile
 
 logger = logging.getLogger(__name__)
 
+# Upper bound on a single download, as a safety net against an unbounded or
+# malicious payload. Ghidra releases are a few hundred MB; 4 GiB is well clear.
+MAX_DOWNLOAD_BYTES = 4 * 1024 * 1024 * 1024
+
 
 def _verify_digest(file_path: Path, asset: dict) -> None:
     """Best-effort integrity check of a downloaded asset.
@@ -166,6 +170,7 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     resp = requests.get(
         f"https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/{tag}",
         headers={"User-Agent": "gvm"},
+        timeout=30,
     )
     resp.raise_for_status()
     release = resp.json()
@@ -189,16 +194,27 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         # up repeated installs during development.
         logger.info("Using cached download")
     elif not getattr(args, "offline", False):
-        # Stream the download to disk with a progress bar sized to the asset.
+        # Stream the download to disk with a progress bar sized to the asset,
+        # bounding total bytes as a safety net and cleaning up a partial file.
         dl_resp = requests.get(url, stream=True, timeout=300)
         dl_resp.raise_for_status()
-        with (
-            open(dl_path, "wb") as f,
-            tqdm(total=asset_size, unit="B", unit_scale=True) as pbar,
-        ):
-            for chunk in dl_resp.iter_content(chunk_size=65536):
-                f.write(chunk)
-                pbar.update(len(chunk))
+        written = 0
+        try:
+            with (
+                open(dl_path, "wb") as f,
+                tqdm(total=asset_size, unit="B", unit_scale=True) as pbar,
+            ):
+                for chunk in dl_resp.iter_content(chunk_size=65536):
+                    written += len(chunk)
+                    if written > MAX_DOWNLOAD_BYTES:
+                        raise RuntimeError(
+                            f"Download exceeded {MAX_DOWNLOAD_BYTES} bytes; aborting"
+                        )
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+        except Exception:
+            dl_path.unlink(missing_ok=True)
+            raise
     else:
         # --offline was passed and we have no cached copy: can't continue.
         logger.error("Offline and no cached version found")
