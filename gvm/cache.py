@@ -77,8 +77,15 @@ class CacheEntry:
 
     @classmethod
     def from_dict(cls, d: dict) -> "CacheEntry":
-        # Reconstruct nested ExtEntry objects from the raw dicts.
-        exts = {k: ExtEntry.from_dict(v) for k, v in d.get("extensions", {}).items()}
+        # Reconstruct nested ExtEntry objects from the raw dicts. Skip any single
+        # malformed extension record rather than letting it blow away the whole
+        # cache (Cacher.load resets everything on an unhandled exception).
+        exts: dict[str, ExtEntry] = {}
+        for k, v in d.get("extensions", {}).items():
+            if isinstance(v, dict):
+                exts[k] = ExtEntry.from_dict(v)
+            else:
+                logger.warning("Skipping malformed extension record %r", k)
         return cls(
             path=d.get("path", ""),
             launcher=d.get("launcher"),
@@ -119,12 +126,18 @@ class Prefs:
     @classmethod
     def from_dict(cls, d: dict) -> "Prefs":
         # Each field falls back to its default if absent from the TOML.
+        # Coerce ui_scale_override to int so a hand-edited string value doesn't
+        # later blow up `prefs show`'s "%d" formatting.
+        try:
+            scale = int(d.get("ui_scale_override", 1))
+        except (TypeError, ValueError):
+            scale = 1
         return cls(
-            pyghidra=d.get("pyghidra", False),
-            ui_scale_override=d.get("ui_scale_override", 1),
+            pyghidra=bool(d.get("pyghidra", False)),
+            ui_scale_override=scale,
             install_dir=d.get("install_dir", ""),
             ext_dir=d.get("ext_dir", ""),
-            keep_gui_open=d.get("keep_gui_open", True),
+            keep_gui_open=bool(d.get("keep_gui_open", True)),
         )
 
 

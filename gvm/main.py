@@ -93,11 +93,13 @@ def update_latest_version(cacher: Cacher) -> bool:
     return False
 
 
-def do_update_check(cacher: Cacher, args) -> bool:
+def do_update_check(cacher: Cacher, args) -> bool | None:
     """Run an update check, swallowing network errors so the CLI stays usable.
 
-    Returns whether a new version was found. Records the check time regardless
-    so we don't hammer the API on every invocation.
+    Returns True if a newer version was found, False if already up to date, or
+    ``None`` if the check couldn't be completed (network/HTTP error). Records the
+    check time regardless — including on failure — so we back off instead of
+    re-hitting the API (each with a 30s timeout) on every subsequent command.
     """
     logger.debug("Checking for updates")
     try:
@@ -107,7 +109,10 @@ def do_update_check(cacher: Cacher, args) -> bool:
         # should never abort the user's actual command. Catch them narrowly so
         # genuine bugs (e.g. a KeyError) still surface.
         logger.warning("Failed to check for update: %s", e)
-        return False
+        # Record the attempt so the rate-limit gate still backs off.
+        cacher.cache.last_update_check = datetime.now(timezone.utc)
+        cacher.save()
+        return None
 
     # In launcher mode, pop a desktop notification when something new appears.
     if new_version and getattr(args, "launcher", False):
@@ -289,14 +294,21 @@ def main() -> None:
 
     elif cmd == "list":
         # Show up to 100 releases from GitHub, annotating installed/default.
-        resp = requests.get(
-            "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
-            params={"per_page": 100},
-            headers={"User-Agent": "gvm"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        results = resp.json()
+        if getattr(args, "offline", False):
+            logger.error("Can't list releases while offline")
+            return
+        try:
+            resp = requests.get(
+                "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
+                params={"per_page": 100},
+                headers={"User-Agent": "gvm"},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            results = resp.json()
+        except requests.RequestException as e:
+            logger.error("Failed to fetch releases: %s", e)
+            return
         logger.info("Available releases:")
         for c in results:
             if args.verbose:
@@ -317,7 +329,10 @@ def main() -> None:
                 logger.info(out)
 
     elif cmd == "install":
-        install_version(cacher, args, path, args.tag)
+        try:
+            install_version(cacher, args, path, args.tag)
+        except requests.RequestException as e:
+            logger.error("Failed to install %s: %s", args.tag, e)
 
     elif cmd == "run":
         tag = _resolve_tag(args.tag, cacher)
@@ -362,21 +377,33 @@ def main() -> None:
             runner = install_path / "ghidraRun.bat"
 
         if not runner.exists():
-            # The install directory was removed out from under us; drop the stale
-            # cache entry so the next run re-installs cleanly.
+            if not install_path.exists():
+                # The whole install directory is gone — most likely a moved or
+                # unmounted location, not an uninstall. Keep the cache record so
+                # reconnecting it doesn't force a full re-download.
+                logger.error(
+                    "Install directory not found: %s (unmounted or moved?). "
+                    "Keeping the record — reconnect it, or `uninstall` to clear.",
+                    install_path,
+                )
+                return
+            # Directory present but the runner is missing → a broken install.
             del cacher.cache.entries[tag]
             cacher.save()
-            logger.error("Failed to find runner, did the installation get removed?")
+            logger.error("Runner missing from %s; the install looks broken — removed it", install_path)
             return
 
         logger.info("Launching %s", runner)
         if sys.platform == "linux":
             # On Linux, replace this process with Ghidra so no idle Python lingers.
             os.execv(str(runner), [str(runner)])
+        elif sys.platform == "win32":
+            # A .bat isn't directly executable via CreateProcess; run it through
+            # the shell so cmd interprets it. The runner path is GVM-controlled.
+            subprocess.Popen([str(runner)], shell=True)
+            sys.exit(0)
         else:
-            # execv on Windows/macOS behaves differently (and .bat isn't directly
-            # exec-able on Windows), so spawn a child and exit so we don't leave
-            # GVM sitting in the foreground waiting on Ghidra.
+            # macOS: spawn a child and exit so GVM doesn't sit in the foreground.
             subprocess.Popen([str(runner)])
             sys.exit(0)
 
@@ -403,11 +430,21 @@ def main() -> None:
         if dcmd == "show":
             logger.info(cacher.cache.default)
         elif dcmd == "set":
-            # Record the new default, installing it if we don't already have it.
+            # Install first (if needed); only persist the new default once that
+            # succeeds, so a bad tag can't poison the default with a version that
+            # isn't installed and can't be fetched.
+            if not cacher.is_installed(args.tag) and args.tag not in ("latest",):
+                try:
+                    install_version(cacher, args, path, args.tag)
+                except requests.RequestException as e:
+                    logger.error("Couldn't set default to %s: %s", args.tag, e)
+                    return
+                if not cacher.is_installed(args.tag):
+                    # install_version bailed (e.g. empty/unknown tag) without raising.
+                    logger.error("Couldn't set default to %s: install did not complete", args.tag)
+                    return
             cacher.cache.default = args.tag
             cacher.save()
-            if not cacher.is_installed(args.tag):
-                install_version(cacher, args, path, args.tag)
 
     elif cmd == "update":
         # "update" only makes sense when tracking "latest"; a pinned default
@@ -436,8 +473,11 @@ def main() -> None:
         # Force a check by clearing the cached "latest" first so the comparison
         # in update_latest_version always reports the current newest as "new".
         cacher.cache.latest_known = ""
-        if not do_update_check(cacher, args):
-            logger.info("You have the latest version, I've checked")
+        result = do_update_check(cacher, args)
+        if result is None:
+            logger.error("Couldn't reach GitHub to check for updates")
+        else:
+            logger.info("Latest available version: %s", cacher.cache.latest_known)
 
     elif cmd == "prefs":
         pcmd = _SUB_ALIASES.get(args.prefs_cmd, args.prefs_cmd)
@@ -520,12 +560,17 @@ def main() -> None:
                 logger.error("That version isn't installed")
         elif scmd == "restore":
             # Restore a previously-made ZIP backup into the chosen version.
-            if tag in cacher.cache.entries:
-                BackupRestorer.from_path(Path(args.src)).restore_to_cached_version(
-                    cacher.cache.entries[tag]
-                )
-            else:
+            if tag not in cacher.cache.entries:
                 logger.error("That version isn't installed")
+            elif not Path(args.src).is_file():
+                logger.error("Backup file not found: %s", args.src)
+            else:
+                try:
+                    BackupRestorer.from_path(Path(args.src)).restore_to_cached_version(
+                        cacher.cache.entries[tag]
+                    )
+                except ValueError as e:
+                    logger.error("Couldn't restore backup: %s", e)
 
 
 if __name__ == "__main__":
