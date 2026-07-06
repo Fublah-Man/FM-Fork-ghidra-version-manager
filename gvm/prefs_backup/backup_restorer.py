@@ -29,10 +29,19 @@ class BackupRestorer:
         install_dir = Path(cache_entry.path).name
         pref_path = ghidra_prefs_path(install_dir)
 
-        # Pull the prefs blob and the GVM metadata back out of the ZIP.
-        with zipfile.ZipFile(io.BytesIO(self.backup_data), "r") as zf:
-            prefs_data = zf.read("prefs")
-            cfg = GvmConfig.from_toml_bytes(zf.read("gvm_config.toml"))
+        # Pull the prefs blob and the GVM metadata back out of the ZIP, refusing
+        # anything that isn't a GVM backup rather than crashing with a KeyError.
+        try:
+            with zipfile.ZipFile(io.BytesIO(self.backup_data), "r") as zf:
+                names = set(zf.namelist())
+                if not {"prefs", "gvm_config.toml"} <= names:
+                    raise ValueError(
+                        "Not a GVM backup (missing prefs/gvm_config.toml)"
+                    )
+                prefs_data = zf.read("prefs")
+                cfg = GvmConfig.from_toml_bytes(zf.read("gvm_config.toml"))
+        except zipfile.BadZipFile as e:
+            raise ValueError(f"Not a valid backup ZIP: {e}") from e
 
         logger.info("Restoring backup version %d from %s", cfg.version, cfg.tag)
         # Ensure the (possibly brand-new) config directory exists, then write.
