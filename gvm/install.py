@@ -166,13 +166,25 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         return
     logger.debug("Installing actual tag '%s'", tag)
 
+    # Installing needs the release metadata, which requires the network.
+    if getattr(args, "offline", False):
+        logger.error("Can't install %s while offline (need release metadata)", tag)
+        return
+
     # Fetch the release metadata for this exact tag from GitHub.
-    resp = requests.get(
-        f"https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/{tag}",
-        headers={"User-Agent": "gvm"},
-        timeout=30,
-    )
-    resp.raise_for_status()
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/{tag}",
+            headers={"User-Agent": "gvm"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except requests.HTTPError:
+        logger.error("No such Ghidra release: %s", tag)
+        return
+    except requests.RequestException as e:
+        logger.error("Couldn't reach GitHub to fetch release %s: %s", tag, e)
+        return
     release = resp.json()
 
     # Ghidra publishes a single zip asset per release; bail clearly if absent.
@@ -279,14 +291,21 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         desktop = app_dir / f"ghidra_{version}.desktop"
 
         # Convert Ghidra's bundled .ico to a .png the desktop entry can use.
+        # The icon is cosmetic — if Pillow is missing or the .ico isn't there,
+        # warn and carry on rather than aborting (and orphaning) the install.
         icon_path = dir_path / "support" / "ghidra_ico.png"
-        _ico_to_png(ico_file_path, icon_path)
+        icon_line = ""
+        try:
+            _ico_to_png(ico_file_path, icon_path)
+            icon_line = f"Icon={icon_path}\n"
+        except Exception as e:
+            logger.warning("Couldn't generate launcher icon: %s", e)
 
         entry = "[Desktop Entry]\n"
         entry += f"Name=Ghidra ({version})\n"
         entry += "Comment=Ghidra\n"
         entry += f"Exec={exec_cmd}\n"
-        entry += f"Icon={icon_path}\n"
+        entry += icon_line
         entry += "Type=Application\n"
         entry += "Categories=Development\n"
         entry += "StartupWMClass=ghidra-Ghidra\n"
@@ -320,7 +339,11 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         plist = plist_template.replace("{name}", name).replace("{version}", version)
         (cont / "Info.plist").write_text(plist, encoding="utf-8")
 
-        _ico_to_png(ico_file_path, resource_dir / "Icon.png")
+        # Cosmetic icon — non-fatal if it can't be produced.
+        try:
+            _ico_to_png(ico_file_path, resource_dir / "Icon.png")
+        except Exception as e:
+            logger.warning("Couldn't generate app icon: %s", e)
         launcher = app
     # NOTE: Windows intentionally has no desktop launcher yet (tracked in the
     # project's todo); `launcher` stays None and that's recorded in the cache.
@@ -360,13 +383,26 @@ def apply_ui_scale(install_dir: Path, scale: int) -> None:
         shutil.copy2(props_path, props_backup_path)
 
     props = GhidraPropsFile.from_path(props_backup_path)
-    vmargs = props.get_by_key("VMARGS_LINUX")
-    if vmargs is None:
-        raise RuntimeError("Can't find VMARGS_LINUX prop")
-    # Drop any pre-existing uiScale arg, then append the requested value.
-    vmargs = [v for v in vmargs if not v.startswith("-Dsun.java2d.uiScale=")]
-    vmargs.append(f"-Dsun.java2d.uiScale={scale}")
-    props.put("VMARGS_LINUX", vmargs)
+
+    # Ghidra keeps separate VM-arg lines per OS; patch whichever ones this
+    # launch.properties actually defines so the override works on Linux, Windows
+    # and macOS (not just Linux).
+    patched_any = False
+    for key in ("VMARGS_LINUX", "VMARGS_WIN", "VMARGS_MACOS", "VMARGS"):
+        vmargs = props.get_by_key(key)
+        if vmargs is None:
+            continue
+        # Drop any pre-existing uiScale arg, then append the requested value.
+        vmargs = [v for v in vmargs if not v.startswith("-Dsun.java2d.uiScale=")]
+        vmargs.append(f"-Dsun.java2d.uiScale={scale}")
+        props.put(key, vmargs)
+        patched_any = True
+
+    if not patched_any:
+        # Nothing to patch — warn rather than raise so a single unusual release
+        # doesn't abort the whole install.
+        logger.warning("No VMARGS_* key in %s; skipped UI-scale override", props_path)
+        return
     props.save_to_file(props_path)
 
 
