@@ -23,6 +23,13 @@ class GvmConfig:
 
     @classmethod
     def from_toml_bytes(cls, data: bytes) -> "GvmConfig":
-        """Parse the metadata back from the TOML bytes stored in a backup."""
-        d = tomllib.loads(data.decode())
-        return cls(version=d["version"], tag=d["tag"])
+        """Parse the metadata back from the TOML bytes stored in a backup.
+
+        Tolerates missing keys (defaults) so a slightly-off or older config
+        doesn't raise a bare KeyError partway through a restore.
+        """
+        try:
+            d = tomllib.loads(data.decode())
+        except tomllib.TOMLDecodeError as e:
+            raise ValueError(f"Invalid backup metadata: {e}") from e
+        return cls(version=int(d.get("version", 0)), tag=str(d.get("tag", "")))

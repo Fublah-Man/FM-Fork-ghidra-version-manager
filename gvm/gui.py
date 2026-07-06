@@ -1211,10 +1211,13 @@ class GVMApp(ctk.CTk):
         self.cacher.save()
 
         self._set_status(f"Launching {tag}...")
+        # On Windows the runner is a .bat, which CreateProcess can't launch
+        # directly — run it through the shell. The path is GVM-controlled.
+        use_shell = sys.platform == "win32"
         if self.cacher.cache.prefs.keep_gui_open:
             # Default: launch Ghidra as a child so this GUI keeps running. Track
             # the handle so _poll_queue can reap it when Ghidra exits.
-            self._children.append(subprocess.Popen([str(runner)]))
+            self._children.append(subprocess.Popen([str(runner)], shell=use_shell))
         elif sys.platform == "linux":
             # Opt-out behaviour: replace the GUI process with Ghidra. execv skips
             # atexit, so release the single-instance lock first — otherwise it
@@ -1223,7 +1226,7 @@ class GVMApp(ctk.CTk):
             os.execv(str(runner), [str(runner)])
         else:
             # Windows/macOS can't execv a .bat cleanly, so spawn then close.
-            subprocess.Popen([str(runner)])
+            subprocess.Popen([str(runner)], shell=use_shell)
             self.destroy()
 
     def _on_set_default(self, value: str) -> None:

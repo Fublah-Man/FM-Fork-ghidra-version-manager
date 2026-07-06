@@ -22,14 +22,17 @@ class GhidraPropsFile:
         # errors="replace" keeps a stray non-UTF-8 byte from aborting the parse.
         text = path.read_text(encoding="utf-8", errors="replace")
         for line in text.splitlines():
-            # Skip comment lines.
-            if line.startswith("#"):
+            # Skip comment lines and blanks (after trimming surrounding space).
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
                 continue
             # Split on the first '=' only, so values may themselves contain '='.
-            if "=" in line:
-                eq = line.index("=")
-                key = line[:eq]
-                val = line[eq + 1:]
+            if "=" in stripped:
+                eq = stripped.index("=")
+                # Strip the key so a stray " VMARGS_LINUX =" still matches the
+                # literal lookups callers do (e.g. apply_ui_scale).
+                key = stripped[:eq].strip()
+                val = stripped[eq + 1:]
                 # Append to this key's value list (creating it if new).
                 fields.setdefault(key, []).append(val)
         # Store keys sorted for deterministic output.

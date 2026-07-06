@@ -458,6 +458,16 @@ def _install_processor_git(
     # Where extracted files are allowed to land; used for the traversal check.
     dest_root = (base / ext_name).resolve()
 
+    # Refuse to write into a directory that already exists — it could be a
+    # built-in Ghidra processor, and uninstall (which rmtrees dest_root) would
+    # then destroy it. Updates go through remove-then-install, so the dir is
+    # gone by the time we get here in that flow.
+    if dest_root.exists():
+        raise RuntimeError(
+            f"Refusing to install into existing directory {dest_root} "
+            "(possible collision with a built-in processor); remove it first"
+        )
+
     # GitHub tarballs wrap everything in a top-level "<user>-<repo>-<sha>/"
     # directory. We detect that prefix from the first entry, then strip it from
     # every member so files land directly under base/ext_name.
@@ -781,14 +791,17 @@ def _ext_scan(cacher: Cacher, args) -> None:
     added = 0
 
     for ext in found:
-        # Local extensions get a synthetic "local-<name>" slug to avoid clashing
-        # with registry slugs.
-        slug = f"local-{ext['name'].lower().replace(' ', '-')}"
+        # Use the same slug generator as registry registration so the entry is
+        # findable by uninstall (a divergent slug made scanned exts un-removable).
+        slug = _generate_slug(ext["name"], ext.get("source", "directory"))
         if slug in ghidra_entry.extensions:
             logger.debug("Already registered: %s", ext["name"])
             continue
 
-        ghidra_entry.extensions[slug] = ExtEntry(files=[ext["path"]])
+        # Record NO files: _ext_scan only *registers* a discovered extension, it
+        # doesn't copy anything into the install. Storing the source path here
+        # would make uninstall delete the user's own files in ext_dir.
+        ghidra_entry.extensions[slug] = ExtEntry(files=[])
         logger.info("Added: %s (%s) -> %s", ext["name"], ext["source"], ext["path"])
         added += 1
 
