@@ -12,7 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
@@ -110,7 +110,7 @@ def do_update_check(cacher: Cacher, args) -> bool | None:
         # genuine bugs (e.g. a KeyError) still surface.
         logger.warning("Failed to check for update: %s", e)
         # Record the attempt so the rate-limit gate still backs off.
-        cacher.cache.last_update_check = datetime.now(timezone.utc)
+        cacher.cache.last_update_check = datetime.now(UTC)
         cacher.save()
         return None
 
@@ -130,7 +130,7 @@ def do_update_check(cacher: Cacher, args) -> bool | None:
             # Any other notification backend failure is non-fatal.
             logger.debug("Failed to send notification: %s", e)
 
-    cacher.cache.last_update_check = datetime.now(timezone.utc)
+    cacher.cache.last_update_check = datetime.now(UTC)
     cacher.save()
     return new_version
 
@@ -278,7 +278,7 @@ def main() -> None:
     # always if we've never learned a latest version. Skipped for offline-y
     # commands (see _allow_update_check).
     if _allow_update_check(cmd):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         hours_since = (now - cacher.cache.last_update_check).total_seconds() / 3600
         if hours_since > 18 or not cacher.cache.latest_known:
             do_update_check(cacher, args)

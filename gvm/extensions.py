@@ -20,11 +20,11 @@ import re
 import shutil
 import sys
 import tarfile
+import tomllib
 from pathlib import Path, PurePosixPath
 
 import requests
 import tomli_w
-import tomllib
 
 from gvm.cache import Cacher, ExtEntry
 
@@ -641,7 +641,7 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
                     if props_entry:
                         # Parse the manifest straight out of the zip.
                         raw = zf.read(props_entry).decode("utf-8", errors="replace")
-                        props: dict[str, str] = {}
+                        props = {}
                         for line in raw.splitlines():
                             line = line.strip()
                             if line and not line.startswith("#") and "=" in line:

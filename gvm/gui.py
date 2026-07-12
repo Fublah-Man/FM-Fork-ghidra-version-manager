@@ -30,14 +30,14 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from gvm.cache import Cacher, CacheEntry, ExtEntry
-from gvm.extensions import _load_all_extensions, _scan_ext_dir, _ext_uninstall
+from gvm.cache import Cacher, ExtEntry
+from gvm.extensions import _load_all_extensions, _scan_ext_dir
 from gvm.install import install_version
 from gvm.main import update_latest_version
 from gvm.prefs_backup.backup_generator import BackupGenerator
@@ -1252,7 +1252,11 @@ class GVMApp(ctk.CTk):
 
     def _do_install_extension(self, name: str, ghidra_version: str, force: bool = False) -> None:
         self._task_queue.put(f"Installing extension {name}...")
-        from gvm.extensions import find_by_name, _install_download_only, _install_processor_git
+        from gvm.extensions import (
+            _install_download_only,
+            _install_processor_git,
+            find_by_name,
+        )
 
         try:
             entry = find_by_name(name)
@@ -1436,6 +1440,7 @@ class GVMApp(ctk.CTk):
         folders and ``.zip`` bundles. Used by the local-source update check.
         """
         import zipfile
+
         from gvm.extensions import _parse_extension_properties
 
         versions: dict[str, str] = {}
