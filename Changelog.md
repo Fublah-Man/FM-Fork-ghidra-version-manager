@@ -8,6 +8,56 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 ## Python Fork (Fublah-Man)
 
+### 0.4 - 2026-07-12
+
+A full-project hardening pass (security, correctness, edge cases) with a test
+suite and CI to keep it that way.
+
+#### Security
+- **Arbitrary file write fixed** — a user-added extension's GitHub release could
+  name an asset with `../` and escape the download directory; asset names are now
+  reduced to a safe basename with a containment check.
+- `parse_git_url` validates owner/repo (`^[A-Za-z0-9._-]+$`), so separators and
+  URL metacharacters can't reach filesystem paths or API URLs.
+- Processor-module extraction rejects an unsafe module name before it can
+  relocate the extraction root; downloads and archive extraction are size-capped.
+
+#### Fixed
+- **`gvm install <bad-tag>` / `default set <bad-tag>`** no longer crash with a
+  traceback, and a bad tag can no longer poison the saved default.
+- **GUI Extensions tab install path** corrected to `Ghidra/Extensions` (it was
+  pointed at Ghidra's archive dir), so installed extensions display, and
+  install/update/uninstall/update-check target the right place; local extensions
+  are now unpacked (Ghidra loads folders, not loose zips).
+- **Extension update-check** compares the recorded release tag against the latest
+  tag (was comparing against the Ghidra build version → constant false positives)
+  and no longer fires ~50 unauthenticated requests per click.
+- `settings restore` validates the backup ZIP instead of crashing on a foreign
+  file; one malformed extension record no longer wipes the whole cache.
+- `--offline` is honored for `list` and install metadata; the update-check records
+  its timestamp even on failure (rate-limit back-off works), and `check-update`
+  distinguishes "couldn't check" from "up to date".
+- `apply_ui_scale` patches the platform-appropriate `VMARGS_*` keys (was
+  Linux-only); a missing icon no longer orphans a half-finished install.
+- Windows launches the `.bat` runner through the shell (avoids WinError 193).
+
+#### Added
+- **Test suite** (`tests/`, ~70 network-free unit tests) and **CI**
+  (`.github/workflows/ci.yml`): ruff + pytest (blocking), mypy (advisory), a
+  merge-conflict-marker gate, byte-compile, and a CLI smoke test on Python
+  3.11/3.12. A `[project.optional-dependencies] dev` group installs the tooling.
+- `GITHUB_TOKEN` / `GH_TOKEN` support to raise the GitHub API rate limit.
+- Registry entries honor their `asset_pattern` when selecting a release asset.
+
+#### Changed
+- The cache is written **atomically** (temp file + `os.replace`), so a concurrent
+  CLI and GUI can't observe a half-written `cache.toml`.
+- The extracted Ghidra directory is derived from the archive's actual top-level
+  folder rather than reconstructed from the zip filename.
+- Removed 22 machine-specific `local-*.toml` files that had leaked into the
+  bundled registry; local-extension registration now writes to the per-user data
+  directory. Added `gvm/py.typed`; stopped tracking build/tool-cache artifacts.
+
 ### 0.3 - 2026-05-16
 
 #### Changed

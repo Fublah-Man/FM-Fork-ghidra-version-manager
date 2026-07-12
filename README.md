@@ -271,7 +271,13 @@ GVM stores its state in a `cache.toml` file:
 | Windows | `%LOCALAPPDATA%\gvm\cache.toml` |
 | Linux / macOS | `~/.local/opt/gvm/cache.toml` |
 
-This file tracks installed versions, extensions, preferences, default version, and update-check timestamps. It is managed automatically by GVM.
+This file tracks installed versions, extensions, preferences, default version, and update-check timestamps. It is managed automatically by GVM and written atomically (so a concurrent CLI + GUI can't corrupt it).
+
+### Environment variables
+
+| Variable | Effect |
+|---|---|
+| `GITHUB_TOKEN` / `GH_TOKEN` | If set, GVM authenticates its GitHub API calls, raising the rate limit from 60 to 5000 requests/hour. Useful if you check for extension updates often. Only the token's default (public) scope is needed. |
 
 ---
 
@@ -324,6 +330,23 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 - **No compiled binary** - runs as a Python package via `pip install` instead of `cargo install`
 - **Fewer system dependencies** - no Rust toolchain required; just Python 3.11+
 - **`plyer` replaces `notify-rust`** for desktop notifications (optional dependency)
+
+---
+
+## Development
+
+Install the dev tooling and run the checks:
+
+```bash
+pip install -e ".[dev]"
+pytest            # unit tests
+ruff check gvm    # lint
+mypy gvm          # type check (advisory)
+```
+
+CI runs the same checks on Python 3.11 and 3.12, plus a gate that fails on
+leftover merge-conflict markers. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+details.
 
 ---
 

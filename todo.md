@@ -1,2 +1,2 @@
-Update Extensions
-non unix backups
+non unix backups (Windows prefs backup/restore)
+Windows desktop launcher
