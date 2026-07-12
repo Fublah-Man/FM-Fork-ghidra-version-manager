@@ -3,10 +3,16 @@
 import io
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from gvm.cache import CacheEntry
 from gvm.prefs_backup import ghidra_prefs_path
 from gvm.prefs_backup.gvm_config import GvmConfig
+
+if TYPE_CHECKING:
+    # Import only for type-checking to avoid the runtime circular import; the
+    # real import happens lazily inside restorer().
+    from gvm.prefs_backup.backup_restorer import BackupRestorer
 
 
 class BackupGenerator:

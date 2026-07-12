@@ -27,6 +27,7 @@ import tomli_w
 import tomllib
 
 from gvm.cache import Cacher, ExtEntry
+from gvm.http_util import gh_headers
 
 logger = logging.getLogger(__name__)
 
@@ -212,9 +213,17 @@ def scan_installed_extensions(install_path: Path) -> list[dict]:
     """
     base = Path(install_path)
     found: list[dict] = []
+    seen: set[str] = set()
 
-    ext_dir = base / "Ghidra" / "Extensions"
-    if ext_dir.is_dir():
+    # Installed extensions live directly under Ghidra/Extensions/<Ext>, but some
+    # Ghidra layouts nest them one level deeper under Ghidra/Extensions/Ghidra/.
+    # Scan both so the panel works regardless of which the release uses.
+    for ext_dir in (
+        base / "Ghidra" / "Extensions",
+        base / "Ghidra" / "Extensions" / "Ghidra",
+    ):
+        if not ext_dir.is_dir():
+            continue
         for item in sorted(ext_dir.iterdir()):
             if not item.is_dir():
                 continue
@@ -222,7 +231,11 @@ def scan_installed_extensions(install_path: Path) -> list[dict]:
             if not props_file.is_file():
                 continue
             props = _parse_extension_properties(props_file)
-            found.append({"name": props.get("name", item.name), "source": "extension"})
+            name = props.get("name", item.name)
+            if name in seen:
+                continue
+            seen.add(name)
+            found.append({"name": name, "source": "extension"})
 
     return found
 
@@ -370,7 +383,7 @@ def _install_download_only(
     # Find the latest release of the extension's GitHub repo.
     rel_resp = requests.get(
         f"https://api.github.com/repos/{entry['repo_user']}/{entry['repo_repo']}/releases/latest",
-        headers={"User-Agent": "gvm"},
+        headers=gh_headers(),
         timeout=30,
     )
     rel_resp.raise_for_status()
@@ -426,7 +439,7 @@ def _install_processor_git(
         url,
         stream=True,
         timeout=300,
-        headers={"User-Agent": "gvm"},
+        headers=gh_headers(),
     )
     dl_resp.raise_for_status()
     # The tarball endpoint usually omits Content-Length, so derive a total when

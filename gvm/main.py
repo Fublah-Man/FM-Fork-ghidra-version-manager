@@ -19,6 +19,7 @@ import requests
 
 from gvm.cache import Cacher
 from gvm.extensions import handle_ext_cmd
+from gvm.http_util import gh_headers
 from gvm.install import install_version
 from gvm.prefs_backup.backup_generator import BackupGenerator
 from gvm.prefs_backup.backup_restorer import BackupRestorer
@@ -79,7 +80,7 @@ def update_latest_version(cacher: Cacher) -> bool:
     """
     resp = requests.get(
         "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest",
-        headers={"User-Agent": "gvm"},
+        headers=gh_headers(),
         timeout=30,
     )
     resp.raise_for_status()
@@ -301,7 +302,7 @@ def main() -> None:
             resp = requests.get(
                 "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
                 params={"per_page": 100},
-                headers={"User-Agent": "gvm"},
+                headers=gh_headers(),
                 timeout=30,
             )
             resp.raise_for_status()
@@ -409,7 +410,13 @@ def main() -> None:
 
     elif cmd == "uninstall":
         tag = _resolve_tag(args.tag, cacher)
-        if tag in cacher.cache.entries:
+        if not tag:
+            # e.g. `uninstall latest` before any update check has run.
+            logger.error(
+                "Couldn't resolve which version to uninstall (%r). Pass an "
+                "explicit tag — see `gvm list`.", args.tag
+            )
+        elif tag in cacher.cache.entries:
             entry = cacher.cache.entries[tag]
             # Remove the unpacked Ghidra tree...
             shutil.rmtree(entry.path, ignore_errors=True)

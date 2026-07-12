@@ -9,6 +9,7 @@ records everything in the cache.
 
 import hashlib
 import logging
+import re
 import shlex
 import shutil
 import subprocess
@@ -21,6 +22,7 @@ from tqdm import tqdm
 
 from gvm.cache import CacheEntry, Cacher
 from gvm.ghidra_props_parser import GhidraPropsFile
+from gvm.http_util import gh_headers
 
 logger = logging.getLogger(__name__)
 
@@ -65,15 +67,20 @@ def _verify_digest(file_path: Path, asset: dict) -> None:
     logger.debug("Checksum verified for %s", file_path.name)
 
 
-def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
+def _safe_extract_zip(zip_path: Path, dest: Path) -> str | None:
     """Extract *zip_path* into *dest* with path-traversal protection.
 
     ``zipfile.extractall`` will happily honour entries containing ``..`` or
     absolute paths, letting a malicious archive write files anywhere on disk
     (a "zip slip"). We validate every member up front and refuse the whole
     archive if any entry would escape *dest*.
+
+    Returns the archive's single top-level directory name (so the caller can
+    locate the extracted tree without guessing from the file name), or ``None``
+    when the archive has zero or multiple top-level entries.
     """
     dest_resolved = dest.resolve()
+    top_levels: set[str] = set()
     with zipfile.ZipFile(zip_path, "r") as zf:
         for info in zf.infolist():
             # Reject obvious absolute paths early.
@@ -85,8 +92,12 @@ def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
             target = (dest_resolved / name).resolve()
             if not target.is_relative_to(dest_resolved):
                 raise RuntimeError(f"Unsafe path in archive escapes target dir: {name}")
+            first = name.replace("\\", "/").split("/", 1)[0]
+            if first:
+                top_levels.add(first)
         # All members validated — safe to extract.
         zf.extractall(dest)
+    return next(iter(top_levels)) if len(top_levels) == 1 else None
 
 
 def do_java_check() -> None:
@@ -175,7 +186,7 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     try:
         resp = requests.get(
             f"https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/{tag}",
-            headers={"User-Agent": "gvm"},
+            headers=gh_headers(),
             timeout=30,
         )
         resp.raise_for_status()
@@ -201,9 +212,11 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     dl_path = path / f"ghidra_{release['tag_name']}.zip"
     logger.info("💾 Saving to %s", dl_path)
 
-    if dl_path.exists() and __debug__:
-        # In a normal (non -O) run we reuse a previously downloaded zip to speed
-        # up repeated installs during development.
+    if dl_path.exists():
+        # Reuse a previously downloaded zip (its integrity is re-checked by
+        # _verify_digest below). This also lets an --offline install proceed
+        # when the zip is already present. (Previously gated on __debug__, which
+        # silently broke reuse under `python -O`.)
         logger.info("Using cached download")
     elif not getattr(args, "offline", False):
         # Stream the download to disk with a progress bar sized to the asset,
@@ -238,8 +251,9 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     logger.info("📦 Extracting to %s", path)
 
     try:
-        # Use the path-traversal-safe extractor rather than raw extractall.
-        _safe_extract_zip(dl_path, path)
+        # Use the path-traversal-safe extractor rather than raw extractall. It
+        # returns the archive's single top-level directory when there is one.
+        extracted_root = _safe_extract_zip(dl_path, path)
     except zipfile.BadZipFile as e:
         # A truncated/corrupt download — delete it so the next run re-fetches.
         dl_path.unlink(missing_ok=True)
@@ -252,27 +266,36 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
 
     logger.info("⚙️  Creating application launcher entries")
 
-    # Derive the version string from the zip filename, which looks like
-    # "ghidra_<tag>.zip" where <tag> is e.g. "Ghidra_11.4_build" → parts:
-    # ["ghidra", "Ghidra", "11.4", "build.zip"] and parts[2] is the version.
-    # Validate the shape first so a surprising tag format raises a clear error
-    # instead of an opaque IndexError.
-    file_name = dl_path.name
-    parts = file_name.split("_")
-    if len(parts) < 3:
-        raise RuntimeError(
-            f"Unexpected release zip name '{file_name}'; "
-            "expected the form 'ghidra_<...>_<version>...zip'"
-        )
-    version = parts[2]
-    dir_name = f"ghidra_{version}_PUBLIC"
+    # Prefer the directory the archive actually produced over reconstructing its
+    # name from the zip filename (brittle to Ghidra naming changes).
+    dir_path: Path | None = None
+    if extracted_root and (path / extracted_root).is_dir():
+        dir_path = path / extracted_root
 
-    # Ghidra historically used a "_PUBLIC" suffix on the extracted folder; fall
-    # back to the un-suffixed name for older releases.
-    dir_path = dl_path.parent / dir_name
-    if not dir_path.exists():
-        logger.info("Failed to find extract, trying old style without suffix")
-        dir_path = dl_path.parent / f"ghidra_{version}"
+    # A human version string, used only for launcher names. Derive it from the
+    # extracted dir (ghidra_<version>_PUBLIC) when we have it, else fall back to
+    # parsing the zip filename.
+    version = ""
+    if dir_path is not None:
+        m = re.match(r"ghidra_(.+?)(?:_PUBLIC)?$", dir_path.name)
+        if m:
+            version = m.group(1)
+    if not version:
+        parts = dl_path.name.split("_")
+        if len(parts) < 3:
+            raise RuntimeError(
+                f"Unexpected release zip name '{dl_path.name}'; "
+                "expected the form 'ghidra_<...>_<version>...zip'"
+            )
+        version = parts[2]
+
+    # If the archive didn't yield a single top-level dir, fall back to the
+    # historical name reconstruction (with/without the "_PUBLIC" suffix).
+    if dir_path is None:
+        dir_path = path / f"ghidra_{version}_PUBLIC"
+        if not dir_path.exists():
+            logger.info("Failed to find extract, trying old style without suffix")
+            dir_path = path / f"ghidra_{version}"
 
     # The launcher will invoke this Python interpreter to re-enter GVM in
     # "launcher" mode and run the chosen version.

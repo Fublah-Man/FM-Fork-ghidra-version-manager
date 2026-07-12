@@ -30,14 +30,15 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from gvm.cache import Cacher, CacheEntry, ExtEntry
-from gvm.extensions import _load_all_extensions, _scan_ext_dir, _ext_uninstall
+from gvm.cache import Cacher, ExtEntry
+from gvm.extensions import _load_all_extensions, _scan_ext_dir
+from gvm.http_util import gh_headers
 from gvm.install import install_version
 from gvm.main import update_latest_version
 from gvm.prefs_backup.backup_generator import BackupGenerator
@@ -364,7 +365,7 @@ class GVMApp(ctk.CTk):
             resp = requests.get(
                 "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
                 params={"per_page": self._MORE_PAGE_SIZE, "page": self._more_page},
-                headers={"User-Agent": "gvm"},
+                headers=gh_headers(),
                 timeout=30,
             )
             resp.raise_for_status()
@@ -453,7 +454,7 @@ class GVMApp(ctk.CTk):
             for ext in (".md", ".html"):
                 resp = requests.get(
                     base + ext,
-                    headers={"User-Agent": "gvm"},
+                    headers=gh_headers(),
                     timeout=20,
                 )
                 if resp.status_code == 200:
@@ -1042,7 +1043,7 @@ class GVMApp(ctk.CTk):
             resp = requests.get(
                 "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
                 params={"per_page": self._INITIAL_VERSION_COUNT, "page": 1},
-                headers={"User-Agent": "gvm"},
+                headers=gh_headers(),
                 timeout=30,
             )
             resp.raise_for_status()
@@ -1503,7 +1504,7 @@ class GVMApp(ctk.CTk):
             try:
                 resp = requests.get(
                     f"https://api.github.com/repos/{repo_user}/{repo_repo}/releases/latest",
-                    headers={"User-Agent": "gvm"},
+                    headers=gh_headers(),
                     timeout=15,
                 )
             except requests.RequestException:

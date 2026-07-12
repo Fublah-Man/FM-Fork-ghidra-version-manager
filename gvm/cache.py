@@ -13,6 +13,8 @@ that handles loading the file, saving it, and a couple of convenience lookups.
 """
 
 import logging
+import os
+import tempfile
 import tomllib  # standard-library TOML *reader* (Python 3.11+)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -238,11 +240,28 @@ class Cacher:
         return cls(cache, cache_path)
 
     def save(self) -> None:
-        # Serialise the current state and write it back out. tomli_w requires a
-        # binary file handle.
+        # Serialise and write *atomically*: write to a temp file in the same
+        # directory, flush+fsync, then os.replace() onto the real path. This
+        # keeps a concurrent reader (e.g. the GUI while the CLI runs, or vice
+        # versa) from ever seeing a half-written cache.toml.
         data = self.cache.to_dict()
-        with open(self.cache_path, "wb") as f:
-            tomli_w.dump(data, f)
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            dir=self.cache_path.parent, prefix=".cache.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "wb") as f:
+                tomli_w.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_name, self.cache_path)
+        except BaseException:
+            # Don't leave a stray temp file behind on failure.
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def default_explicit(self) -> str:
         """Resolve ``default`` to a concrete tag.
