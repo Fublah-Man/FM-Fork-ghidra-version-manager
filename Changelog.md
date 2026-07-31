@@ -8,6 +8,104 @@ This is a Python fork of [CUB3D/ghidra-version-manager](https://github.com/CUB3D
 
 ## Python Fork (Fublah-Man)
 
+### 0.4 - 2026-07-30
+
+A full security, correctness and packaging audit with the fixes to match, plus a
+test suite and cross-platform CI to keep it that way. Every issue below was
+reproduced before it was fixed; see `AUDIT-2026-07.md` for the evidence and
+`REMEDIATION-2026-07.md` for the change-by-change mapping.
+
+#### Fixed - critical
+
+- **The bundled extension registry shipped empty.** `extensions-repo/` lived at
+  the repo root and was declared in neither `packages.find` nor `package-data`,
+  so it was absent from every non-editable install. `Path.glob` on the missing
+  directory returned nothing rather than raising, so `gvm extensions list`
+  printed an empty list with no error — 0 of 27 extensions, silently. It now
+  lives at `gvm/extensions-repo/` and is resolved with `importlib.resources`.
+- **macOS installs crashed part-way through.** `res/macos_plist.plist` had the
+  same packaging gap, and the read was unguarded — so it raised
+  `FileNotFoundError` *after* Ghidra had been extracted and
+  `/Applications/Ghidra_X.app` created, leaving an orphaned half-install.
+- **A crafted release could write a launcher anywhere and inject a command into
+  it.** The version string was taken from the release tag with only a
+  segment-*count* check, so a tag shaped `a_<payload>_b` put `<payload>`
+  verbatim into the `.desktop` path — `../../..` escaped the applications
+  directory entirely. The Linux `Exec=` line was also unquoted (only the macOS
+  launcher was quoted). Version strings are now validated and both launchers are
+  shell-quoted.
+
+#### Fixed - high
+
+- **`--offline` still made network calls.** The implicit update check ignored the
+  flag, costing a 30-second timeout per command on a disconnected machine.
+- **An unavailable `install_dir` bricked every command.** Pointing it at a drive
+  and unplugging that drive raised an unhandled `PermissionError` from every
+  invocation — including `gvm prefs set install_dir default`, the command that
+  would have fixed it. Read-only commands now continue; mutating ones exit with
+  a reset instruction.
+- **A truncated `cache.toml` silently reset you to a fresh install.** Writes were
+  non-atomic and a parse failure discarded the file, losing every installed
+  version, extension, preference and the default. Writes now go through a temp
+  file and `os.replace`; a damaged cache is preserved as
+  `cache.toml.corrupt-<timestamp>`.
+- **Preference migration had no rollback.** The restore overwrote the destination
+  with a bare `write_bytes` and no pre-image. It is now transactional: snapshot,
+  atomic write, restore the snapshot on failure.
+- **Missing download digests were ignored silently.** GitHub omitting a `digest`
+  downgraded the install to unverified at *debug* log level. It is now a visible
+  warning, `--require-digest` makes it fatal, and asset URLs are checked against
+  a GitHub host allowlist over HTTPS.
+
+#### Fixed - medium and low
+
+- `_GH_NAME_RE` accepted `.` and `..` despite a comment claiming it blocked them,
+  so `https://github.com/../../etc/repo` parsed to `('..', '..')`.
+- `parse_git_url` silently discarded the hostname, so `https://evil.com/o/r`
+  resolved to `github.com/o/r` — a different repository than the user asked for.
+  Non-GitHub hosts are now rejected.
+- Reuse of a previously downloaded zip was gated on `__debug__`, which is true in
+  every normal run; it now requires `--use-cached` or `GVM_USE_CACHED_DOWNLOAD=1`.
+- The release asset download had no `RequestException` handling (the metadata
+  fetch did), so a dropped connection produced a raw traceback.
+- Asset selection preferred a blind `assets[0]`; it now prefers an actual `.zip`.
+- Emoji in log messages could raise `UnicodeEncodeError` on legacy Windows
+  consoles; all log output is now ASCII, with a CI check to keep it that way.
+- `apply_ui_scale` raised from `shutil.copy2` when `launch.properties` was
+  missing; it now warns and skips.
+- Local extension names made only of punctuation all collapsed to the slug
+  `local-` and overwrote each other's registry files.
+- Windows launches via `["cmd", "/c", runner]` rather than `shell=True`.
+- The JDK check ran before the offline guard, so `--offline install` printed the
+  whole JDK install guide before reporting the actual blocker.
+
+#### Added
+
+- **Test suite** (`tests/`, 115 network-free tests) covering packaging, hostile
+  archives, cache round-trip and corruption recovery, URL and slug validation,
+  offline behaviour, the state lock, preference rollback, and the service layer.
+- **CI** across Windows, macOS and Linux on Python 3.11–3.14, plus a
+  `packaged-install` job that builds a wheel, installs it into a clean venv
+  outside the source tree and asserts the bundled data actually shipped — the
+  check that would have caught both packaging failures above.
+- `ruff` (blocking) and `mypy` (advisory) via a `dev` extra.
+- `gvm/service.py` — frontend-agnostic operations shared by the CLI and GUI.
+- `gvm/lockfile.py` — a shared state lock. The GUI holds it; the CLI refuses
+  mutating commands while it's held, so the two can no longer overwrite each
+  other's `cache.toml` changes.
+- `gvm/gui_tasks.py` — the GUI's threading policy, testable without a display.
+- `gvm/http.py` — `GITHUB_TOKEN` / `GH_TOKEN` support (60 → 5,000 requests/hour)
+  and connection reuse across the several calls a command makes.
+- `--require-digest` and `--use-cached` flags.
+- `CONTRIBUTING.md`.
+
+#### Changed
+
+- Dependencies gained upper bounds (`requests<3`, `tqdm<5`, `tomli-w<2`,
+  `pillow<13`).
+- Removed a stale committed worktree copy of the repo
+  (`.claude/worktrees/gallant-galileo-679816/`) and tracked `__pycache__`.
+
 ### 0.3 - 2026-05-16
 
 #### Changed

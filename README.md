@@ -259,6 +259,8 @@ Requires the `gui` extra (`pip install -e ".[gui]"`). The GUI provides three tab
 | `-v`, `--verbose` | Enable detailed logging output |
 | `-o`, `--offline` | Disable all network access (use cached data only) |
 | `-l`, `--launcher` | Run in launcher mode |
+| `--require-digest` | Refuse to install a download GitHub publishes no SHA-256 digest for. Off by default, because Ghidra releases don't always carry one — but when a digest is absent GVM warns you that integrity could not be verified |
+| `--use-cached` | Reuse a previously downloaded release zip instead of re-fetching it |
 
 ---
 
@@ -271,7 +273,16 @@ GVM stores its state in a `cache.toml` file:
 | Windows | `%LOCALAPPDATA%\gvm\cache.toml` |
 | Linux / macOS | `~/.local/opt/gvm/cache.toml` |
 
-This file tracks installed versions, extensions, preferences, default version, and update-check timestamps. It is managed automatically by GVM.
+This file tracks installed versions, extensions, preferences, default version, and update-check timestamps. It is managed automatically by GVM and written atomically (temp file + rename), so an interrupted write can't corrupt it. If it ever does become unreadable, GVM preserves it as `cache.toml.corrupt-<timestamp>` and tells you where it went rather than silently starting over.
+
+While the GUI is open it holds a lock on this state. CLI commands that would modify it refuse to run and say so; read-only commands (`locate`, `list`, `check-update`) work as normal.
+
+### Environment variables
+
+| Variable | Effect |
+|---|---|
+| `GITHUB_TOKEN` / `GH_TOKEN` | If set, GVM authenticates its GitHub API calls, raising the rate limit from 60 to 5000 requests/hour. Useful if you check for extension updates often. Only the token's default (public) scope is needed. `GVM_GITHUB_TOKEN` takes precedence if you want a GVM-specific token. |
+| `GVM_USE_CACHED_DOWNLOAD=1` | Reuse an already-downloaded release zip instead of re-fetching it. Equivalent to `--use-cached`. |
 
 ---
 
@@ -324,6 +335,22 @@ This Python fork is a **complete port** of the original [CUB3D/ghidra-version-ma
 - **No compiled binary** - runs as a Python package via `pip install` instead of `cargo install`
 - **Fewer system dependencies** - no Rust toolchain required; just Python 3.11+
 - **`plyer` replaces `notify-rust`** for desktop notifications (optional dependency)
+
+---
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest                  # 115 network-free unit tests
+ruff check gvm tests    # lint
+mypy gvm                # type check (advisory; gui.py excluded)
+```
+
+CI runs the suite on Windows, macOS and Linux across Python 3.11–3.14, plus a
+job that builds a wheel, installs it into a clean environment and verifies the
+bundled extension registry actually shipped. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ---
 

@@ -2,15 +2,12 @@
 
 import os
 import sys
-import zipfile
 
 import pytest
 
 import gvm.main as main
-from gvm.cache import Cache, CacheEntry, Cacher
 from gvm.lockfile import StateLock, _pid_is_running
 from gvm.prefs_backup.backup_restorer import _atomic_write_with_rollback
-
 
 # --- offline (H-1) ----------------------------------------------------------
 

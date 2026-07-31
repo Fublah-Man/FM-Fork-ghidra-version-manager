@@ -18,7 +18,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from gvm.cache import Cacher
 from gvm.install import install_version
@@ -59,7 +58,7 @@ def install_dir(cacher: Cacher) -> Path:
     return Path(configured) if configured else data_dir()
 
 
-def resolve_tag(cacher: Cacher, tag: Optional[str], default: str = "default") -> str:
+def resolve_tag(cacher: Cacher, tag: str | None, default: str = "default") -> str:
     """Resolve None / "default" / "latest" to a concrete tag.
 
     May return "" when "latest" or "default" point at ``latest_known`` and no
@@ -74,7 +73,7 @@ def resolve_tag(cacher: Cacher, tag: Optional[str], default: str = "default") ->
     return t
 
 
-def require_tag(cacher: Cacher, tag: Optional[str], action: str = "run") -> str:
+def require_tag(cacher: Cacher, tag: str | None, action: str = "run") -> str:
     """Like :func:`resolve_tag`, but raise a clear error on the empty case.
 
     Every frontend needs this guard and each one used to write its own (or, in
@@ -98,7 +97,7 @@ def is_installed(cacher: Cacher, tag: str) -> bool:
     return bool(tag) and tag in cacher.cache.entries
 
 
-def runner_path(cacher: Cacher, tag: str, pyghidra: Optional[bool] = None) -> Path:
+def runner_path(cacher: Cacher, tag: str, pyghidra: bool | None = None) -> Path:
     """Absolute path to the launcher script for an installed version.
 
     *pyghidra* overrides the stored preference for a single launch.
@@ -117,7 +116,7 @@ def runner_path(cacher: Cacher, tag: str, pyghidra: Optional[bool] = None) -> Pa
     return base / name
 
 
-def check_runner(cacher: Cacher, tag: str, pyghidra: Optional[bool] = None) -> Path:
+def check_runner(cacher: Cacher, tag: str, pyghidra: bool | None = None) -> Path:
     """Return the runner path, distinguishing "moved away" from "broken".
 
     A missing *install directory* usually means an unmounted or relocated disk,
@@ -142,7 +141,7 @@ def check_runner(cacher: Cacher, tag: str, pyghidra: Optional[bool] = None) -> P
     )
 
 
-def launch(runner: Path, replace_process: bool = True) -> Optional[subprocess.Popen]:
+def launch(runner: Path, replace_process: bool = True) -> subprocess.Popen | None:
     """Start Ghidra.
 
     When *replace_process* is true and the platform supports it, this replaces
@@ -159,7 +158,7 @@ def launch(runner: Path, replace_process: bool = True) -> Optional[subprocess.Po
     return subprocess.Popen([str(runner)])
 
 
-def install(cacher: Cacher, tag: str, options: Optional[InstallOptions] = None) -> None:
+def install(cacher: Cacher, tag: str, options: InstallOptions | None = None) -> None:
     """Install *tag*, raising ServiceError instead of just logging on failure."""
     opts = options or InstallOptions()
     target = install_dir(cacher)
@@ -220,7 +219,7 @@ def set_pyghidra(cacher: Cacher, enabled: bool) -> None:
     cacher.save()
 
 
-def set_install_dir(cacher: Cacher, value: Optional[str]) -> str:
+def set_install_dir(cacher: Cacher, value: str | None) -> str:
     """Set (or reset, with "default"/None) the install directory."""
     if not value or value == "default":
         cacher.cache.prefs.install_dir = ""
@@ -237,7 +236,7 @@ def set_install_dir(cacher: Cacher, value: Optional[str]) -> str:
     return str(path)
 
 
-def set_ext_dir(cacher: Cacher, value: Optional[str]) -> str:
+def set_ext_dir(cacher: Cacher, value: str | None) -> str:
     """Set (or clear, with "default"/None) the local extensions directory."""
     if not value or value == "default":
         cacher.cache.prefs.ext_dir = ""

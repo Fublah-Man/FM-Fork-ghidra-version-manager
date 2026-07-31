@@ -10,7 +10,6 @@ from gvm import service
 from gvm.cache import Cache, CacheEntry, Cacher, Prefs
 from gvm.gui_tasks import TaskRunner, parse_event, reap
 
-
 # --- service: tag resolution ------------------------------------------------
 
 def _cacher(**kw):

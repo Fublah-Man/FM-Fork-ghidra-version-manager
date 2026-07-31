@@ -2,7 +2,7 @@
 
 import pytest
 
-from gvm.extensions import _generate_slug, _GH_NAME_RE, parse_git_url
+from gvm.extensions import _GH_NAME_RE, _generate_slug, parse_git_url
 
 
 @pytest.mark.parametrize("url,expected", [

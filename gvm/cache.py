@@ -17,9 +17,8 @@ import os
 import tempfile
 import tomllib  # standard-library TOML *reader* (Python 3.11+)
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 import tomli_w  # third-party TOML *writer* (stdlib has no writer)
 
@@ -63,7 +62,7 @@ class CacheEntry:
     path: str = ""
     # Path to the desktop launcher we created (.desktop file / .app bundle).
     # None on platforms where we don't create one (e.g. Windows).
-    launcher: Optional[str] = None
+    launcher: str | None = None
     # Map of extension slug -> ExtEntry for everything installed into this version.
     extensions: dict[str, ExtEntry] = field(default_factory=dict)
 
@@ -157,7 +156,7 @@ class Cache:
     # successful update check.
     latest_known: str = ""
     # Timestamp of the last successful update check (used to rate-limit checks).
-    last_update_check: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    last_update_check: datetime = field(default_factory=lambda: datetime.now(UTC))
     # User preferences.
     prefs: Prefs = field(default_factory=Prefs)
     # The tag launched most recently, used to migrate preferences when switching.
@@ -186,19 +185,19 @@ class Cache:
         raw_dt = d.get("last_update_check", None)
         if isinstance(raw_dt, datetime):
             # Native datetime: attach UTC if it's naive.
-            last_update_check = raw_dt if raw_dt.tzinfo else raw_dt.replace(tzinfo=timezone.utc)
+            last_update_check = raw_dt if raw_dt.tzinfo else raw_dt.replace(tzinfo=UTC)
         elif isinstance(raw_dt, str) and raw_dt:
             # ISO-8601 string: parse it, defaulting to UTC if no offset present.
             try:
                 last_update_check = datetime.fromisoformat(raw_dt)
                 if last_update_check.tzinfo is None:
-                    last_update_check = last_update_check.replace(tzinfo=timezone.utc)
+                    last_update_check = last_update_check.replace(tzinfo=UTC)
             except ValueError:
                 # Corrupt/unparseable value — fall back to "now".
-                last_update_check = datetime.now(timezone.utc)
+                last_update_check = datetime.now(UTC)
         else:
             # Missing or unexpected type — fall back to "now".
-            last_update_check = datetime.now(timezone.utc)
+            last_update_check = datetime.now(UTC)
 
         return cls(
             entries=entries,
@@ -254,9 +253,9 @@ class Cacher:
         return cls(cache, cache_path)
 
     @staticmethod
-    def _preserve_corrupt(cache_path: Path) -> Optional[Path]:
+    def _preserve_corrupt(cache_path: Path) -> Path | None:
         """Move an unparseable cache aside so it isn't overwritten. Best-effort."""
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
         target = cache_path.with_name(f"{cache_path.name}.corrupt-{stamp}")
         try:
             os.replace(cache_path, target)

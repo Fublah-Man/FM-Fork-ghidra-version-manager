@@ -20,7 +20,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +71,7 @@ class StateLock:
 
     # -- inspection ---------------------------------------------------------
 
-    def read_owner(self) -> Optional[tuple[int, str]]:
+    def read_owner(self) -> tuple[int, str] | None:
         """Return ``(pid, label)`` of the current holder, or None if unlocked."""
         try:
             raw = self.lock_path.read_text(encoding="utf-8")
@@ -91,7 +90,7 @@ class StateLock:
                 label = value or "unknown"
         return (pid, label)
 
-    def held_by_other(self) -> Optional[tuple[int, str]]:
+    def held_by_other(self) -> tuple[int, str] | None:
         """Return the live holder if someone *else* holds the lock, else None.
 
         Clears the lock file if it refers to a process that no longer exists.

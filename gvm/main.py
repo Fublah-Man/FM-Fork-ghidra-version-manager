@@ -12,13 +12,13 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
 
-from gvm.cache import Cacher
 from gvm import http as ghttp
+from gvm.cache import Cacher
 from gvm.extensions import handle_ext_cmd
 from gvm.install import install_version
 from gvm.lockfile import state_lock
@@ -120,7 +120,7 @@ def do_update_check(cacher: Cacher, args) -> bool | None:
         # genuine bugs (e.g. a KeyError) still surface.
         logger.warning("Failed to check for update: %s", e)
         # Record the attempt so the rate-limit gate still backs off.
-        cacher.cache.last_update_check = datetime.now(timezone.utc)
+        cacher.cache.last_update_check = datetime.now(UTC)
         cacher.save()
         return None
 
@@ -140,7 +140,7 @@ def do_update_check(cacher: Cacher, args) -> bool | None:
             # Any other notification backend failure is non-fatal.
             logger.debug("Failed to send notification: %s", e)
 
-    cacher.cache.last_update_check = datetime.now(timezone.utc)
+    cacher.cache.last_update_check = datetime.now(UTC)
     cacher.save()
     return new_version
 
@@ -354,7 +354,7 @@ def main() -> None:
     # request, defeating the flag entirely and costing a 30s timeout per command
     # on a disconnected machine.
     if _allow_update_check(cmd) and not getattr(args, "offline", False):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         hours_since = (now - cacher.cache.last_update_check).total_seconds() / 3600
         if hours_since > 18 or not cacher.cache.latest_known:
             do_update_check(cacher, args)

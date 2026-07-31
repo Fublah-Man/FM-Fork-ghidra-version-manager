@@ -4,9 +4,9 @@ Storing a version number and the source tag alongside the raw preferences lets
 future GVM versions recognise (and if necessary migrate) older backup formats.
 """
 
+import tomllib  # TOML reader (stdlib, 3.11+)
 from dataclasses import dataclass
 
-import tomllib  # TOML reader (stdlib, 3.11+)
 import tomli_w  # TOML writer (third-party)
 
 

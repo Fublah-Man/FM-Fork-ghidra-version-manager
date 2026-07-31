@@ -28,6 +28,23 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dev tooling
+        run: python -m pip install --upgrade pip && pip install ".[dev]"
+
+      - name: Lint
+        run: ruff check gvm tests
+
+      - name: Type check
+        # Advisory for now: gui.py is excluded (see pyproject), and the GUI
+        # rewiring onto gvm/service.py is still outstanding. Flip to blocking
+        # once that lands.
+        continue-on-error: true
+        run: mypy gvm
+
   test:
     # All three platforms are first-class per the README. Ubuntu-only CI is what
     # let the macOS packaging bug (missing res/macos_plist.plist) ship.

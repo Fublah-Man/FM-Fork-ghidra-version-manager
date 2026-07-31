@@ -10,8 +10,7 @@ import zipfile
 
 import pytest
 
-from gvm.install import _safe_extract_zip, _validate_version, _check_download_host
-
+from gvm.install import _check_download_host, _safe_extract_zip, _validate_version
 
 # --- zip extraction ---------------------------------------------------------
 

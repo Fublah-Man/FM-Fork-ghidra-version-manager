@@ -20,11 +20,10 @@ import re
 import shutil
 import sys
 import tarfile
+import tomllib
 from pathlib import Path, PurePosixPath
 
-import requests
 import tomli_w
-import tomllib
 
 from gvm import http as ghttp
 from gvm.cache import Cacher, ExtEntry
@@ -615,14 +614,15 @@ def _ext_uninstall(cacher: Cacher, args) -> None:
                 shutil.rmtree(p, ignore_errors=True)
 
 
-def _parse_extension_properties(props_path: Path) -> dict[str, str]:
-    """Parse a Ghidra extension.properties file into a dict.
+def _parse_properties_text(raw: str) -> dict[str, str]:
+    """Parse extension.properties content into a dict.
 
     The format is simple ``key=value`` lines; blank lines and ``#`` comments are
-    ignored.
+    ignored. Split out from :func:`_parse_extension_properties` so the zip-scanning
+    path can reuse it instead of carrying a second copy of the same loop.
     """
     props: dict[str, str] = {}
-    for line in props_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    for line in raw.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -630,6 +630,13 @@ def _parse_extension_properties(props_path: Path) -> dict[str, str]:
             key, _, value = line.partition("=")
             props[key.strip()] = value.strip()
     return props
+
+
+def _parse_extension_properties(props_path: Path) -> dict[str, str]:
+    """Parse a Ghidra extension.properties file into a dict."""
+    return _parse_properties_text(
+        props_path.read_text(encoding="utf-8", errors="replace")
+    )
 
 
 def _scan_ext_dir(ext_dir: Path) -> list[dict]:
@@ -686,14 +693,11 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
                             break
 
                     if props_entry:
-                        # Parse the manifest straight out of the zip.
+                        # Parse the manifest straight out of the zip, reusing the
+                        # same parser the directory branch uses rather than a
+                        # second inline copy of the same loop.
                         raw = zf.read(props_entry).decode("utf-8", errors="replace")
-                        props: dict[str, str] = {}
-                        for line in raw.splitlines():
-                            line = line.strip()
-                            if line and not line.startswith("#") and "=" in line:
-                                k, _, v = line.partition("=")
-                                props[k.strip()] = v.strip()
+                        props = _parse_properties_text(raw)
                         name = props.get("name", item.stem)
                     else:
                         # No manifest — fall back to the file name.

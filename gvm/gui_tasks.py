@@ -19,7 +19,8 @@ The rules this module enforces:
 import logging
 import queue
 import threading
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class TaskRunner:
     """Runs one background task at a time and funnels results to a queue."""
 
     def __init__(self) -> None:
-        self.queue: "queue.Queue[Any]" = queue.Queue()
+        self.queue: queue.Queue[Any] = queue.Queue()
         self._busy = False
 
     @property
@@ -112,7 +113,7 @@ def reap(children: list) -> list:
     return [c for c in children if c.poll() is None]
 
 
-def parse_event(message: Any) -> tuple[str, Optional[Any]]:
+def parse_event(message: Any) -> tuple[str, Any | None]:
     """Classify a queued message into ``(kind, payload)``.
 
     Kinds: ``"done"`` (sentinel), ``"event"`` (tagged tuple), ``"status"``

@@ -13,7 +13,6 @@ Two jobs:
 
 import logging
 import os
-from typing import Optional
 
 import requests
 
@@ -21,10 +20,10 @@ logger = logging.getLogger(__name__)
 
 USER_AGENT = "gvm"
 
-_session: Optional[requests.Session] = None
+_session: requests.Session | None = None
 
 
-def github_token() -> Optional[str]:
+def github_token() -> str | None:
     """Return a GitHub token from the environment, if the user set one."""
     for var in ("GVM_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN"):
         value = os.environ.get(var)

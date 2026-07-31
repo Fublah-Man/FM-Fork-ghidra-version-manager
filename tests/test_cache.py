@@ -1,8 +1,6 @@
 """Cache round-trip, atomic write and corruption-recovery tests (H-3)."""
 
-from datetime import datetime, timezone
 
-import pytest
 
 from gvm.cache import Cache, CacheEntry, Cacher, ExtEntry, Prefs
 

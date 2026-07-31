@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ghidra-version-manager"
-version = "0.3"
+version = "0.4"
 description = "Ghidra Version Manager - Python conversion"
 license = {text = "GPL-3.0-only"}
 authors = [
@@ -46,4 +46,30 @@ gvm = ["py.typed", "extensions-repo/*.toml", "res/*.plist"]
 [project.optional-dependencies]
 notifications = ["plyer>=2.1"]
 gui = ["customtkinter>=5.2"]
-dev = ["pytest>=8.0"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-requests",
+]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# F=pyflakes (unused/undefined names), I=import order, B=bugbear (likely bugs),
+# UP=pyupgrade. Line length (E501) is deliberately not enforced: the codebase
+# has long explanatory comments and wrapping them would be churn for no gain.
+select = ["F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+# gui.py leans heavily on customtkinter/tkinter dynamic attributes; type-checking
+# it produces noise rather than signal, so it's excluded until the tab split
+# lands and the logic moves into gvm/service.py (which IS checked).
+exclude = ["gvm/gui\\.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
