@@ -15,15 +15,11 @@ readme = "README.md"
 keywords = ["ghidra"]
 requires-python = ">=3.11"
 dependencies = [
-    "requests>=2.32",
-    "tqdm>=4.67",
-    "tomli-w>=1.1",
-    "pillow>=11.0",
+    "requests>=2.32,<3",
+    "tqdm>=4.67,<5",
+    "tomli-w>=1.1,<2",
+    "pillow>=11.0,<13",
 ]
-
-[project.optional-dependencies]
-notifications = ["plyer>=2.1"]
-gui = ["customtkinter>=5.2"]
 
 [project.scripts]
 gvm = "gvm.main:main"
@@ -40,4 +36,14 @@ where = ["."]
 include = ["gvm*"]
 
 [tool.setuptools.package-data]
-gvm = ["py.typed"]
+# py.typed advertises inline type information (PEP 561).
+# extensions-repo/ is the bundled extension registry — it MUST ship inside the
+# package. It previously lived at the repo root, which meant it was absent from
+# every non-editable install and `gvm extensions list` silently showed nothing.
+# res/ holds the macOS .app Info.plist template, needed by `install` on darwin.
+gvm = ["py.typed", "extensions-repo/*.toml", "res/*.plist"]
+
+[project.optional-dependencies]
+notifications = ["plyer>=2.1"]
+gui = ["customtkinter>=5.2"]
+dev = ["pytest>=8.0"]

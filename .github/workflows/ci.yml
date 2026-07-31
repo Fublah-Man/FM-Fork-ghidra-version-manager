@@ -6,18 +6,11 @@ on:
   pull_request:
 
 jobs:
-  check:
+  # Fast structural checks that don't need a matrix.
+  lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
 
       - name: Fail on leftover merge-conflict markers
         run: |
@@ -26,16 +19,101 @@ jobs:
             exit 1
           fi
 
-      - name: Install package
-        run: python -m pip install --upgrade pip && pip install .
+      - name: Fail on non-ASCII in log messages
+        # Emoji in logger calls raise UnicodeEncodeError on Windows consoles
+        # still using a legacy code page.
+        run: |
+          if grep -RPn 'logger\.(debug|info|warning|error)\(.*[^\x00-\x7F]' --include='*.py' gvm; then
+            echo "::error::Non-ASCII character in a log message"
+            exit 1
+          fi
+
+  test:
+    # All three platforms are first-class per the README. Ubuntu-only CI is what
+    # let the macOS packaging bug (missing res/macos_plist.plist) ship.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        # 3.14 included because it is what the maintainer develops on; the suite
+        # passes there locally, so CI should keep it that way.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package with dev extras
+        run: python -m pip install --upgrade pip && pip install ".[dev]"
 
       - name: Byte-compile all modules
         run: python -m compileall -q gvm
 
       - name: Import core (non-GUI) modules
-        run: python -c "import gvm.main, gvm.extensions, gvm.install, gvm.cache"
+        run: python -c "import gvm.main, gvm.extensions, gvm.install, gvm.cache, gvm.lockfile, gvm.http, gvm.service"
+
+      - name: Run tests
+        run: python -m pytest tests/ -q
+
+  # The check that would have caught both packaging Criticals: build a wheel,
+  # install it into a clean environment *outside* the source tree, and confirm
+  # the bundled data files actually shipped.
+  packaged-install:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build a wheel
+        run: python -m pip install --upgrade pip build && python -m build --wheel
+
+      - name: Install the wheel into a clean venv
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/clean"
+          if [ -f "$RUNNER_TEMP/clean/bin/python" ]; then
+            echo "CLEAN_PY=$RUNNER_TEMP/clean/bin/python" >> "$GITHUB_ENV"
+            echo "CLEAN_GVM=$RUNNER_TEMP/clean/bin/gvm" >> "$GITHUB_ENV"
+          else
+            echo "CLEAN_PY=$RUNNER_TEMP/clean/Scripts/python" >> "$GITHUB_ENV"
+            echo "CLEAN_GVM=$RUNNER_TEMP/clean/Scripts/gvm" >> "$GITHUB_ENV"
+          fi
+
+      - name: Install the built wheel
+        shell: bash
+        run: |
+          "$CLEAN_PY" -m pip install --upgrade pip
+          "$CLEAN_PY" -m pip install dist/*.whl
+
+      - name: Bundled registry and resources must be present
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          "$CLEAN_PY" -c "
+          import gvm.extensions as e, gvm.install as i
+          entries = e._load_all_extensions()
+          assert e.EXTENSIONS_REPO.is_dir(), f'registry dir missing: {e.EXTENSIONS_REPO}'
+          assert len(entries) >= 27, f'expected >=27 extensions, packaged install has {len(entries)}'
+          plist = i._read_package_resource('res/macos_plist.plist')
+          assert '{name}' in plist, 'macOS plist template did not ship'
+          print(f'OK: {len(entries)} extensions, plist present')
+          "
 
       - name: Smoke-test the CLI
+        shell: bash
+        working-directory: ${{ runner.temp }}
         run: |
-          gvm --help
-          gvm prefs show
+          "$CLEAN_GVM" --help
+          "$CLEAN_GVM" --offline prefs show
+          "$CLEAN_GVM" --offline extensions list

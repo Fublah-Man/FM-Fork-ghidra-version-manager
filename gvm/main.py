@@ -18,8 +18,10 @@ from pathlib import Path
 import requests
 
 from gvm.cache import Cacher
+from gvm import http as ghttp
 from gvm.extensions import handle_ext_cmd
 from gvm.install import install_version
+from gvm.lockfile import state_lock
 from gvm.prefs_backup.backup_generator import BackupGenerator
 from gvm.prefs_backup.backup_restorer import BackupRestorer
 
@@ -27,6 +29,13 @@ logger = logging.getLogger(__name__)
 
 # Process exit code used when a `locate` lookup fails, so scripts can detect it.
 EXIT_CODE_NOT_FOUND = 1
+# Process exit code used when the GUI holds the state lock.
+EXIT_CODE_LOCKED = 3
+
+# Commands that only read state. These are allowed to run while the GUI holds
+# the state lock, and are allowed to proceed when a configured install_dir is
+# unavailable.
+_READ_ONLY_COMMANDS = frozenset({"locate", "list", "check-update", "gui"})
 
 # Short aliases for top-level commands (e.g. `gvm i` == `gvm install`). These are
 # resolved manually after parsing because argparse aliases on the top-level
@@ -77,16 +86,17 @@ def update_latest_version(cacher: Cacher) -> bool:
     Returns True if this call discovered a *newer* tag than we had cached
     (i.e. an update just became available), False otherwise.
     """
-    resp = requests.get(
+    resp = ghttp.get(
         "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/latest",
-        headers={"User-Agent": "gvm"},
         timeout=30,
     )
     resp.raise_for_status()
     tag_name = resp.json()["tag_name"]
 
     if cacher.cache.latest_known != tag_name:
-        logger.info("🔔🔔🔔 New version available: %s 🔔🔔🔔", tag_name)
+        # Plain ASCII: emoji raise UnicodeEncodeError inside the logging handler
+        # on a Windows console still using a legacy code page.
+        logger.info("*** New version available: %s ***", tag_name)
         cacher.cache.latest_known = tag_name
         cacher.save()
         return True
@@ -162,13 +172,30 @@ def _backup_and_restore_prefs(
             # The old version was never actually launched, so it has no prefs
             # file to migrate — that's fine, just skip the backup.
             logger.debug("No preferences found for %s, skipping backup", old_tag)
+        except (OSError, ValueError) as e:
+            # A failed backup must not block the install; it just means there is
+            # nothing to migrate.
+            logger.warning("Couldn't back up preferences for %s: %s", old_tag, e)
 
     # Perform the actual install (passed in as a closure by the caller).
     install_fn()
 
     if restorer and new_tag in cacher.cache.entries:
         logger.info("Restoring config to %s", new_tag)
-        restorer.restore_to_cached_version(cacher.cache.entries[new_tag])
+        # Restore is transactional: restore_to_cached_version snapshots whatever
+        # is currently at the destination and puts it back if the write fails.
+        # Previously this call was unguarded and the write had no pre-image, so
+        # an interrupted migration left the new version's preferences
+        # half-written with nothing to roll back to.
+        try:
+            restorer.restore_to_cached_version(cacher.cache.entries[new_tag])
+        except Exception as e:
+            logger.error(
+                "Couldn't migrate preferences to %s: %s. The previous "
+                "preferences were left untouched; %s will start with Ghidra's "
+                "defaults.",
+                new_tag, e, new_tag,
+            )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -178,6 +205,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable expanded logging")
     parser.add_argument("-o", "--offline", action="store_true", help="Disable network access")
     parser.add_argument("-l", "--launcher", action="store_true", help="Run in launcher mode")
+    parser.add_argument(
+        "--require-digest",
+        action="store_true",
+        help="Refuse to install a download GitHub publishes no SHA-256 digest for",
+    )
+    parser.add_argument(
+        "--use-cached",
+        action="store_true",
+        help="Reuse a previously downloaded release zip instead of re-fetching it",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -253,19 +290,40 @@ def main() -> None:
     # ~/.local/opt/gvm; Windows uses %LOCALAPPDATA%\gvm.
     home = Path.home()
     default_path = home / ".local" / "opt" / "gvm" if sys.platform != "win32" else home / "AppData" / "Local" / "gvm"
-    default_path.mkdir(parents=True, exist_ok=True)
+    try:
+        default_path.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.error("Can't create GVM's data directory %s: %s", default_path, e)
+        sys.exit(EXIT_CODE_NOT_FOUND)
 
     cacher = Cacher.load(default_path / "cache.toml")
 
-    # Use a custom install directory if the user configured one, else default.
-    if cacher.cache.prefs.install_dir:
-        path = Path(cacher.cache.prefs.install_dir)
-        path.mkdir(parents=True, exist_ok=True)
-    else:
-        path = default_path
-
     # Map any top-level alias (e.g. "i") to its canonical command name.
     cmd = _COMMAND_ALIASES.get(args.command, args.command)
+
+    # Use a custom install directory if the user configured one, else default.
+    #
+    # This mkdir used to be unguarded, so pointing install_dir at an external
+    # drive and then unplugging it made *every* command die with a raw
+    # PermissionError — including `gvm prefs set install_dir default`, the one
+    # command that would fix it. Read-only commands don't need the directory at
+    # all, so let them through and only hard-fail the ones that must write.
+    path = default_path
+    if cacher.cache.prefs.install_dir:
+        configured = Path(cacher.cache.prefs.install_dir)
+        try:
+            configured.mkdir(parents=True, exist_ok=True)
+            path = configured
+        except OSError as e:
+            logger.error(
+                "Configured install directory %s is unavailable (%s).", configured, e
+            )
+            if cmd not in _READ_ONLY_COMMANDS:
+                logger.error(
+                    "Reconnect it, or reset with: gvm prefs set install_dir default"
+                )
+                sys.exit(EXIT_CODE_NOT_FOUND)
+            logger.warning("Continuing with the default directory for this command.")
 
     # The GUI is launched in a separate module; hand off immediately so we don't
     # run the CLI-oriented update check below.
@@ -274,10 +332,28 @@ def main() -> None:
         launch_gui()
         return
 
+    # Refuse to mutate shared state while the GUI holds it. cache.toml is
+    # read-modify-write, so a concurrent CLI command and GUI session are
+    # last-writer-wins; the GUI is long-lived, so it owns the state while open.
+    if cmd not in _READ_ONLY_COMMANDS:
+        holder = state_lock(default_path).held_by_other()
+        if holder is not None:
+            pid, label = holder
+            logger.error(
+                "The GVM %s (pid %d) is running and holds the state lock. "
+                "Close it before running '%s', or use the GUI to make this change.",
+                label, pid, cmd,
+            )
+            sys.exit(EXIT_CODE_LOCKED)
+
     # Implicit, rate-limited update check: at most once every 18 hours, and
     # always if we've never learned a latest version. Skipped for offline-y
     # commands (see _allow_update_check).
-    if _allow_update_check(cmd):
+    #
+    # The offline test is essential: without it `--offline` still fired this
+    # request, defeating the flag entirely and costing a 30s timeout per command
+    # on a disconnected machine.
+    if _allow_update_check(cmd) and not getattr(args, "offline", False):
         now = datetime.now(timezone.utc)
         hours_since = (now - cacher.cache.last_update_check).total_seconds() / 3600
         if hours_since > 18 or not cacher.cache.latest_known:
@@ -298,10 +374,9 @@ def main() -> None:
             logger.error("Can't list releases while offline")
             return
         try:
-            resp = requests.get(
+            resp = ghttp.get(
                 "https://api.github.com/repos/NationalSecurityAgency/ghidra/releases",
                 params={"per_page": 100},
-                headers={"User-Agent": "gvm"},
                 timeout=30,
             )
             resp.raise_for_status()
@@ -390,7 +465,7 @@ def main() -> None:
             # Directory present but the runner is missing → a broken install.
             del cacher.cache.entries[tag]
             cacher.save()
-            logger.error("Runner missing from %s; the install looks broken — removed it", install_path)
+            logger.error("Runner missing from %s; the install looks broken - removed it", install_path)
             return
 
         logger.info("Launching %s", runner)
@@ -398,9 +473,12 @@ def main() -> None:
             # On Linux, replace this process with Ghidra so no idle Python lingers.
             os.execv(str(runner), [str(runner)])
         elif sys.platform == "win32":
-            # A .bat isn't directly executable via CreateProcess; run it through
-            # the shell so cmd interprets it. The runner path is GVM-controlled.
-            subprocess.Popen([str(runner)], shell=True)
+            # A .bat isn't directly executable via CreateProcess, so it needs
+            # cmd. Invoke cmd explicitly rather than passing shell=True with an
+            # argument list — the latter happens to work on Windows but is a
+            # footgun if this branch is ever reused on POSIX, where shell=True
+            # would execute only the first list element.
+            subprocess.Popen(["cmd", "/c", str(runner)])
             sys.exit(0)
         else:
             # macOS: spawn a child and exit so GVM doesn't sit in the foreground.

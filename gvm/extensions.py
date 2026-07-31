@@ -26,12 +26,35 @@ import requests
 import tomli_w
 import tomllib
 
+from gvm import http as ghttp
 from gvm.cache import Cacher, ExtEntry
 
 logger = logging.getLogger(__name__)
 
 # The bundled registry of known extensions (one TOML file per extension).
-EXTENSIONS_REPO = Path(__file__).parent.parent / "extensions-repo"
+#
+# This lives *inside* the package (gvm/extensions-repo/) and is declared in
+# pyproject's package-data, so it is present in wheels and sdists alike. It used
+# to be resolved as ``Path(__file__).parent.parent / "extensions-repo"``, which
+# pointed at the repo root — correct for an editable checkout, but resolving to
+# a non-existent ``site-packages/extensions-repo`` for every real install. Since
+# ``Path.glob`` on a missing directory yields nothing rather than raising, the
+# registry silently loaded zero of its 27 entries and `gvm extensions list`
+# printed an empty list with no error.
+#
+# ``importlib.resources.files`` is the supported way to locate package data and
+# works for zipped and unzipped installs alike.
+def _bundled_repo_path() -> Path:
+    """Locate the packaged extension registry directory."""
+    try:
+        from importlib.resources import files
+        return Path(str(files("gvm") / "extensions-repo"))
+    except Exception:  # pragma: no cover - importlib always available on 3.11+
+        # Last-resort fallback for unusual loaders: sit next to this module.
+        return Path(__file__).parent / "extensions-repo"
+
+
+EXTENSIONS_REPO = _bundled_repo_path()
 
 # Upper bound on a single downloaded asset/tarball. Guards against a malicious
 # (user-added) extension repo serving an unbounded/zip-bomb payload. Ghidra
@@ -40,7 +63,16 @@ MAX_DOWNLOAD_BYTES = 2 * 1024 * 1024 * 1024
 
 # GitHub owner/repo names allow only these characters. We validate against this
 # before interpolating them into API URLs or filesystem paths.
-_GH_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+#
+# The name must *start* with an alphanumeric. The previous pattern was
+# ``^[A-Za-z0-9._-]+$``, which includes "." in the character class and therefore
+# matched "." and ".." — despite the comment claiming it blocked them. That let
+# a URL like https://github.com/../../etc/repo parse to ('..', '..') and produce
+# the API path /repos/../../releases/latest.
+_GH_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+# Hosts we accept in a user-supplied extension repository URL.
+_GH_HOSTS = frozenset({"github.com", "www.github.com"})
 
 
 def _safe_child(base: Path, untrusted_name: str) -> Path:
@@ -119,6 +151,15 @@ def _load_all_extensions() -> list[dict]:
     return list(exts.values())
 
 
+def _reject_foreign_host(host: str, url: str) -> None:
+    """Raise unless *host* is GitHub (which is the only backend GVM talks to)."""
+    if host.lower().split(":", 1)[0] not in _GH_HOSTS:
+        raise ValueError(
+            f"Only github.com repositories are supported, got host "
+            f"{host!r} in: {url}"
+        )
+
+
 def parse_git_url(url: str) -> tuple[str, str]:
     """Parse a GitHub repo URL into ``(owner, repo)``.
 
@@ -133,16 +174,24 @@ def parse_git_url(url: str) -> tuple[str, str]:
     """
     s = url.strip()
     # Normalise the scp-style SSH form (git@host:owner/repo) to just its path.
-    m = re.match(r"^git@[^:]+:(?P<path>.+)$", s)
+    m = re.match(r"^git@(?P<host>[^:]+):(?P<path>.+)$", s)
     if m:
+        _reject_foreign_host(m.group("host"), url)
         path = m.group("path")
     else:
         # Strip any URL scheme (https://, http://, git://, ssh://, ...).
         path = re.sub(r"^[a-zA-Z][a-zA-Z0-9+.\-]*://", "", s)
         # If the leading segment looks like a hostname (has a dot, e.g.
         # "github.com"), drop it so only the owner/repo path remains.
+        #
+        # The host used to be discarded silently, so "https://evil.com/o/r"
+        # parsed to ('o', 'r') and GVM then fetched github.com/o/r — a different
+        # repository than the user asked for, with no indication. Extensions are
+        # third-party code unpacked into a Ghidra install, so quietly resolving
+        # to the wrong source is exactly the wrong failure mode.
         first = path.split("/", 1)[0]
         if "." in first:
+            _reject_foreign_host(first, url)
             path = path.split("/", 1)[1] if "/" in path else ""
     # Drop a trailing ".git" and surrounding slashes, then take the first two
     # path segments as owner/repo (ignoring extras like /tree/main).
@@ -368,9 +417,8 @@ def _install_download_only(
     logger.info("Installing download only extension")
 
     # Find the latest release of the extension's GitHub repo.
-    rel_resp = requests.get(
+    rel_resp = ghttp.get(
         f"https://api.github.com/repos/{entry['repo_user']}/{entry['repo_repo']}/releases/latest",
-        headers={"User-Agent": "gvm"},
         timeout=30,
     )
     rel_resp.raise_for_status()
@@ -387,7 +435,7 @@ def _install_download_only(
     dl_path = _safe_child(path, asset_name)
     logger.info("Saving to: %s", dl_path)
 
-    dl_resp = requests.get(url, stream=True, timeout=300)
+    dl_resp = ghttp.get(url, stream=True, timeout=300)
     dl_resp.raise_for_status()
     _stream_to_file(dl_resp, dl_path, asset_size or None)
 
@@ -422,11 +470,10 @@ def _install_processor_git(
     dl_path = path / f"{entry['slug']}.tar.gz"
     logger.info("Saving to: %s", dl_path)
 
-    dl_resp = requests.get(
+    dl_resp = ghttp.get(
         url,
         stream=True,
         timeout=300,
-        headers={"User-Agent": "gvm"},
     )
     dl_resp.raise_for_status()
     # The tarball endpoint usually omits Content-Length, so derive a total when
@@ -666,12 +713,24 @@ def _scan_ext_dir(ext_dir: Path) -> list[dict]:
 
 
 def _generate_slug(name: str, source: str) -> str:
-    """Generate a slug for a local extension based on its name."""
+    """Generate a slug for a local extension based on its name.
+
+    Names made entirely of punctuation or whitespace used to reduce to an empty
+    base, so every one of them produced the slug ``local-`` and wrote the same
+    ``local-.toml`` — silently overwriting each other. When nothing usable
+    survives, fall back to a short hash of the original name so distinct
+    extensions stay distinct.
+    """
     base = name.lower().replace(" ", "-").replace("_", "-")
     # Remove non-alphanumeric characters except hyphens
     base = "".join(c for c in base if c.isalnum() or c == "-")
-    base = base.strip("-")
-    return f"local-{base}"
+    # Collapse runs of hyphens introduced by stripped characters.
+    base = re.sub(r"-{2,}", "-", base).strip("-")
+    if not base:
+        import hashlib
+        base = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+    # Keep the filename comfortably inside filesystem limits (255 bytes).
+    return f"local-{base[:80]}"
 
 
 def _find_toml_by_name(name: str) -> Path | None:

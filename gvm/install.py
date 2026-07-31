@@ -9,16 +9,20 @@ records everything in the cache.
 
 import hashlib
 import logging
+import os
+import re
 import shlex
 import shutil
 import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from tqdm import tqdm
 
+from gvm import http as ghttp
 from gvm.cache import CacheEntry, Cacher
 from gvm.ghidra_props_parser import GhidraPropsFile
 
@@ -28,21 +32,95 @@ logger = logging.getLogger(__name__)
 # malicious payload. Ghidra releases are a few hundred MB; 4 GiB is well clear.
 MAX_DOWNLOAD_BYTES = 4 * 1024 * 1024 * 1024
 
+# Hosts we are willing to download release assets from. The asset URL comes out
+# of the GitHub API response, which is attacker-controlled under a MITM or
+# compromised-upstream threat model; without this check a tampered response
+# could point the download at any server.
+ALLOWED_DOWNLOAD_HOSTS = frozenset({
+    "github.com",
+    "api.github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+    "codeload.github.com",
+})
 
-def _verify_digest(file_path: Path, asset: dict) -> None:
-    """Best-effort integrity check of a downloaded asset.
+# A release version string is interpolated into filesystem paths (the extracted
+# directory name, the Linux .desktop filename, the macOS .app bundle name). It
+# is derived from the release tag, which is server-controlled, so it must be a
+# plain version-like token: no separators, no "..", no shell metacharacters.
+_SAFE_VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _read_package_resource(relative: str) -> str:
+    """Read a text file shipped as package data inside ``gvm``."""
+    try:
+        from importlib.resources import files
+        return (files("gvm") / relative).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise
+    except Exception:  # pragma: no cover - unusual loaders only
+        return (Path(__file__).parent / relative).read_text(encoding="utf-8")
+
+
+def _validate_version(version: str) -> str:
+    """Reject a version string that isn't safe to put in a filesystem path.
+
+    Guards the launcher-generation code below. ``version`` is pulled out of the
+    release zip's filename, which derives from the release tag; a tag shaped
+    ``a_<payload>_b`` places ``<payload>`` here verbatim. Without this check a
+    payload of ``../../../..`` escaped the applications directory entirely and
+    let a crafted release write a .desktop file (with an attacker-chosen
+    ``Exec=`` line) anywhere the user could write — ``~/.config/autostart/``
+    being the obvious target.
+    """
+    if not _SAFE_VERSION_RE.match(version):
+        raise RuntimeError(
+            f"Refusing to use unsafe version string from release tag: {version!r}. "
+            "Expected a plain version like '11.4'."
+        )
+    return version
+
+
+def _check_download_host(url: str) -> None:
+    """Abort unless *url* is https on a known GitHub host."""
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise RuntimeError(f"Refusing non-HTTPS download URL: {url}")
+    if parsed.hostname not in ALLOWED_DOWNLOAD_HOSTS:
+        raise RuntimeError(
+            f"Refusing download from unexpected host {parsed.hostname!r}. "
+            "Release assets must come from GitHub."
+        )
+
+
+def _verify_digest(file_path: Path, asset: dict, require: bool = False) -> None:
+    """Integrity check of a downloaded asset.
 
     Newer GitHub API responses include a ``digest`` field on each asset of the
     form ``"sha256:<hex>"``. When present we recompute the SHA-256 of the file
     we just downloaded and abort if it doesn't match — this catches truncated
-    downloads and tampering in transit. Older API responses omit ``digest``;
-    in that case there is nothing to check against, so we simply skip (and say
-    so at debug level) rather than failing.
+    downloads and tampering in transit.
+
+    When the API omits ``digest`` there is nothing to compare against. That used
+    to be skipped at *debug* level, which meant a network attacker able to alter
+    the response could simply strip the field and silently downgrade the install
+    to unverified. It is now a visible warning, and ``require=True`` (from
+    ``--require-digest``) turns it into a hard failure.
     """
     digest = asset.get("digest") or ""
     if not digest.startswith("sha256:"):
-        logger.debug("No sha256 digest published for %s; skipping integrity check",
-                     asset.get("name", file_path.name))
+        name = asset.get("name", file_path.name)
+        if require:
+            file_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"No SHA-256 digest published for {name} and --require-digest "
+                "was given; refusing to install an unverified download."
+            )
+        logger.warning(
+            "No SHA-256 digest published for %s — integrity could NOT be "
+            "verified. Pass --require-digest to refuse unverified downloads.",
+            name,
+        )
         return
 
     expected = digest.split(":", 1)[1].strip().lower()
@@ -87,6 +165,20 @@ def _safe_extract_zip(zip_path: Path, dest: Path) -> None:
                 raise RuntimeError(f"Unsafe path in archive escapes target dir: {name}")
         # All members validated — safe to extract.
         zf.extractall(dest)
+
+
+def _select_release_zip(assets: list[dict]) -> dict:
+    """Pick the Ghidra release zip from a release's asset list.
+
+    Prefers the first asset whose name ends in ``.zip`` over a blind
+    ``assets[0]``: GitHub does not guarantee asset ordering, and a release that
+    gains a checksum or signature asset would otherwise break installs.
+    """
+    for a in assets:
+        if str(a.get("name", "")).lower().endswith(".zip"):
+            return a
+    logger.warning("No .zip asset found in release; falling back to the first asset")
+    return assets[0]
 
 
 def do_java_check() -> None:
@@ -139,9 +231,6 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     *tag* may be a concrete release tag, or one of the sentinels "default" /
     "latest" which are resolved here against the cache.
     """
-    # Nudge the user about the JDK requirement before we do any heavy work.
-    do_java_check()
-
     logger.debug("Installing tag '%s'", tag)
     # Already installed? Nothing to do. (Sentinels aren't keys, so they fall
     # through to the resolution step below.)
@@ -166,16 +255,20 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         return
     logger.debug("Installing actual tag '%s'", tag)
 
-    # Installing needs the release metadata, which requires the network.
+    # Installing needs the release metadata, which requires the network. Check
+    # this before the JDK probe so `--offline install` reports the actual
+    # blocker instead of printing the whole JDK install guide first.
     if getattr(args, "offline", False):
         logger.error("Can't install %s while offline (need release metadata)", tag)
         return
 
+    # Nudge the user about the JDK requirement before we do any heavy work.
+    do_java_check()
+
     # Fetch the release metadata for this exact tag from GitHub.
     try:
-        resp = requests.get(
+        resp = ghttp.get(
             f"https://api.github.com/repos/NationalSecurityAgency/ghidra/releases/tags/{tag}",
-            headers={"User-Agent": "gvm"},
             timeout=30,
         )
         resp.raise_for_status()
@@ -187,29 +280,46 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         return
     release = resp.json()
 
-    # Ghidra publishes a single zip asset per release; bail clearly if absent.
+    # Ghidra publishes a single zip asset per release. Prefer an actual .zip
+    # over a blind assets[0] — releases sometimes carry extra assets (checksum
+    # or signature files) and their order is not guaranteed.
     assets = release.get("assets", [])
     if not assets:
         raise RuntimeError("This tag doesn't have an asset attached")
-    asset = assets[0]
+    asset = _select_release_zip(assets)
     url = asset["browser_download_url"]
     asset_size = asset.get("size", 0)
 
-    logger.info("⬇️  Downloading: %s", url)
+    # The URL comes from the API response; confirm it still points at GitHub
+    # before we stream anything from it.
+    _check_download_host(url)
+
+    logger.info("Downloading: %s", url)
 
     # Save the download next to the install dir, named after the *real* tag.
     dl_path = path / f"ghidra_{release['tag_name']}.zip"
-    logger.info("💾 Saving to %s", dl_path)
+    logger.info("Saving to %s", dl_path)
 
-    if dl_path.exists() and __debug__:
-        # In a normal (non -O) run we reuse a previously downloaded zip to speed
-        # up repeated installs during development.
-        logger.info("Using cached download")
+    # Reusing an existing zip is a development convenience. It used to be gated
+    # on ``__debug__``, which is True in every normal run — so it was in fact the
+    # default for all users, and a stale or planted file in a shared directory
+    # would be used in place of a fresh download. It now requires an explicit
+    # opt-in.
+    reuse_cached = bool(getattr(args, "use_cached", False)) or os.environ.get("GVM_USE_CACHED_DOWNLOAD") == "1"
+
+    if dl_path.exists() and reuse_cached:
+        logger.info("Using cached download (explicitly enabled)")
     elif not getattr(args, "offline", False):
         # Stream the download to disk with a progress bar sized to the asset,
         # bounding total bytes as a safety net and cleaning up a partial file.
-        dl_resp = requests.get(url, stream=True, timeout=300)
-        dl_resp.raise_for_status()
+        try:
+            dl_resp = ghttp.get(url, stream=True, timeout=300)
+            dl_resp.raise_for_status()
+        except requests.RequestException as e:
+            # Previously unguarded, unlike the metadata fetch above, so a dropped
+            # connection surfaced as a raw traceback.
+            logger.error("Failed to download %s: %s", url, e)
+            return
         written = 0
         try:
             with (
@@ -233,9 +343,9 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         return
 
     # Verify the download's integrity before trusting its contents.
-    _verify_digest(dl_path, asset)
+    _verify_digest(dl_path, asset, require=bool(getattr(args, "require_digest", False)))
 
-    logger.info("📦 Extracting to %s", path)
+    logger.info("Extracting to %s", path)
 
     try:
         # Use the path-traversal-safe extractor rather than raw extractall.
@@ -250,7 +360,7 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         dl_path.unlink(missing_ok=True)
         raise RuntimeError(f"Could not extract zip file, deleting: {e}") from e
 
-    logger.info("⚙️  Creating application launcher entries")
+    logger.info("Creating application launcher entries")
 
     # Derive the version string from the zip filename, which looks like
     # "ghidra_<tag>.zip" where <tag> is e.g. "Ghidra_11.4_build" → parts:
@@ -264,7 +374,10 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
             f"Unexpected release zip name '{file_name}'; "
             "expected the form 'ghidra_<...>_<version>...zip'"
         )
-    version = parts[2]
+    # Checking the segment *count* is not enough: a tag shaped "a_<payload>_b"
+    # puts <payload> straight into `version`, which is then interpolated into
+    # several filesystem paths below. Validate the content too.
+    version = _validate_version(parts[2])
     dir_name = f"ghidra_{version}_PUBLIC"
 
     # Ghidra historically used a "_PUBLIC" suffix on the extracted folder; fall
@@ -274,10 +387,22 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         logger.info("Failed to find extract, trying old style without suffix")
         dir_path = dl_path.parent / f"ghidra_{version}"
 
+    # If neither layout is present the extraction produced something we don't
+    # understand. Fail here with a clear message rather than letting every
+    # downstream step (launcher generation, apply_ui_scale) fail obscurely on a
+    # path that doesn't exist.
+    if not dir_path.exists():
+        raise RuntimeError(
+            f"Extracted archive did not contain the expected directory "
+            f"'{dir_name}' (or 'ghidra_{version}') under {dl_path.parent}"
+        )
+
     # The launcher will invoke this Python interpreter to re-enter GVM in
-    # "launcher" mode and run the chosen version.
+    # "launcher" mode and run the chosen version. Every interpolated value is
+    # shell-quoted: this string becomes a .desktop Exec= line (Linux) or a shell
+    # script body (macOS), both of which are parsed as a command line.
     us = sys.executable
-    exec_cmd = f"{us} -m gvm --launcher run {tag}"
+    exec_cmd = f"{shlex.quote(us)} -m gvm --launcher run {shlex.quote(tag)}"
 
     ico_file_path = dir_path / "support" / "ghidra.ico"
 
@@ -321,9 +446,8 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         app.mkdir(parents=True, exist_ok=True)
 
         bin_path = app / name
-        # Quote the interpreter path and tag so spaces or shell metacharacters
-        # in either can't break (or be injected into) the script.
-        script = f"#!/bin/sh -i\nexec {shlex.quote(us)} -m gvm --launcher run {shlex.quote(tag)}\n"
+        # exec_cmd is already fully shell-quoted (see above).
+        script = f"#!/bin/sh -i\nexec {exec_cmd}\n"
         bin_path.write_text(script, encoding="utf-8")
         bin_path.chmod(0o744)
 
@@ -332,10 +456,12 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
         resource_dir = cont / "Resources"
         resource_dir.mkdir(parents=True, exist_ok=True)
 
-        # Fill the plist template (shipped in res/) with this version's details.
-        plist_template = (
-            Path(__file__).parent.parent / "res" / "macos_plist.plist"
-        ).read_text(encoding="utf-8")
+        # Fill the plist template (shipped as package data in gvm/res/) with
+        # this version's details. Resolved via importlib.resources because the
+        # old repo-root path was absent from every non-editable install, making
+        # this an unhandled FileNotFoundError *after* Ghidra had already been
+        # extracted and the .app directory created — an orphaned half-install.
+        plist_template = _read_package_resource("res/macos_plist.plist")
         plist = plist_template.replace("{name}", name).replace("{version}", version)
         (cont / "Info.plist").write_text(plist, encoding="utf-8")
 
@@ -348,7 +474,7 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     # NOTE: Windows intentionally has no desktop launcher yet (tracked in the
     # project's todo); `launcher` stays None and that's recorded in the cache.
 
-    logger.info("📜 Regenerating config")
+    logger.info("Regenerating config")
     # Bake the configured UI-scale override into this install's launch.properties.
     apply_ui_scale(dir_path, cacher.cache.prefs.ui_scale_override)
 
@@ -361,7 +487,7 @@ def install_version(cacher: Cacher, args, path: Path, tag: str) -> None:
     cacher.save()
 
     # The extracted directory is what we keep; the zip is no longer needed.
-    dl_path.unlink()
+    dl_path.unlink(missing_ok=True)
 
 
 def apply_ui_scale(install_dir: Path, scale: int) -> None:
@@ -376,6 +502,16 @@ def apply_ui_scale(install_dir: Path, scale: int) -> None:
     """
     props_path = install_dir / "support" / "launch.properties"
     props_backup_path = install_dir / "support" / "launch.properties.backup"
+
+    # An unusual release layout (or a partially-extracted install) leaves this
+    # file missing. Warn and skip rather than raising an unguarded
+    # FileNotFoundError out of shutil.copy2 — the UI-scale override is a nicety,
+    # not a reason to abort an otherwise-good install.
+    if not props_path.is_file() and not props_backup_path.is_file():
+        logger.warning(
+            "No launch.properties at %s; skipped UI-scale override", props_path
+        )
+        return
 
     # Create the pristine backup the first time only; thereafter it's our source
     # of truth so edits are idempotent.

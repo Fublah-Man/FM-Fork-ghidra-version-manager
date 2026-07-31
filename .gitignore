@@ -11,3 +11,8 @@ build/
 dist/
 .venv/
 venv/
+.pytest_cache/
+
+# GVM runtime artifacts (should never be committed)
+cache.toml.corrupt-*
+gvm.lock

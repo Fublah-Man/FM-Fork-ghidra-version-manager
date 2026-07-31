@@ -36,9 +36,12 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
+from gvm import service
 from gvm.cache import Cacher, CacheEntry, ExtEntry
 from gvm.extensions import _load_all_extensions, _scan_ext_dir, _ext_uninstall
 from gvm.install import install_version
+from gvm.gui_tasks import TaskRunner, marshal, reap
+from gvm.lockfile import StateLock, state_lock
 from gvm.main import update_latest_version
 from gvm.prefs_backup.backup_generator import BackupGenerator
 from gvm.prefs_backup.backup_restorer import BackupRestorer
@@ -85,8 +88,9 @@ class GVMApp(ctk.CTk):
         )
         self._install_path.mkdir(parents=True, exist_ok=True)
 
-        self._task_queue: queue.Queue[str | tuple[str, str] | None] = queue.Queue()
-        self._busy = False
+        # Threading policy lives in gvm.gui_tasks; this object owns the queue
+        # and the one-task-at-a-time flag.
+        self._tasks = TaskRunner()
         self._releases: list[dict] = []
         # Incremental release fetching: we start with the 5 newest releases and
         # the "Load more" button pulls additional pages on demand. _more_page is
@@ -947,6 +951,11 @@ class GVMApp(ctk.CTk):
     # Threading helpers
     # ------------------------------------------------------------------
 
+    @property
+    def _task_queue(self):
+        """Queue workers post to. Owned by the TaskRunner."""
+        return self._tasks.queue
+
     def _set_status(self, msg: str) -> None:
         self._status_var.set(msg)
 
@@ -958,7 +967,7 @@ class GVMApp(ctk.CTk):
                 msg = self._task_queue.get_nowait()
                 if msg is None:
                     # Sentinel: the current background task has finished.
-                    self._busy = False
+                    self._tasks.mark_idle()
                     if self._pending_restart:
                         # A self-update just completed — relaunch and stop polling.
                         self._pending_restart = False
@@ -1007,25 +1016,19 @@ class GVMApp(ctk.CTk):
         return False
 
     def _run_threaded(self, fn, *args, **kwargs) -> None:
-        # Start *fn* on a daemon thread, but only one heavy task at a time so
-        # concurrent installs can't corrupt the shared cache.
-        if self._busy:
-            self._set_status("Another operation is in progress...")
-            return
-        self._busy = True
-        t = threading.Thread(target=self._thread_wrapper, args=(fn, *args), kwargs=kwargs, daemon=True)
-        t.start()
+        """Start *fn* in the background, or report that we're already busy.
 
-    def _thread_wrapper(self, fn, *args, **kwargs) -> None:
-        # Runs the task on the worker thread, funnelling any error to the status
-        # bar and always posting the None "finished" sentinel so _poll_queue can
-        # clear the busy flag even when the task raised.
-        try:
-            fn(*args, **kwargs)
-        except Exception as e:
-            self._task_queue.put(f"Error: {e}")
-        finally:
-            self._task_queue.put(None)
+        The threading policy (one task at a time, workers never touch widgets,
+        always post a completion sentinel) lives in gvm.gui_tasks.TaskRunner so
+        it can be tested without a display.
+        """
+        if not self._tasks.submit(fn, *args, **kwargs):
+            self._set_status("Another operation is in progress...")
+
+    @property
+    def _busy(self) -> bool:
+        """Whether a background task is running (delegated to the runner)."""
+        return self._tasks.busy
 
     # ------------------------------------------------------------------
     # Version operations
@@ -1871,84 +1874,35 @@ class _AddExtensionDialog(ctk.CTkToplevel):
         return self._result
 
 
-def _lock_path() -> Path:
-    """Return the path to the single-instance lock file."""
-    return _default_gvm_path() / ".gui.lock"
+# The single-instance lock is now the *shared* state lock from gvm.lockfile,
+# not a GUI-private file. Two reasons:
+#
+#  1. cache.toml is read-modify-write, so a CLI command running while the GUI
+#     has state loaded was last-writer-wins — a `gvm extensions install` could
+#     be silently erased by the GUI's next save. The CLI now refuses to run
+#     mutating commands while this lock is held.
+#  2. The PID-liveness and stale-lock logic existed in two places; there is now
+#     one implementation, covered by tests.
+def _state_lock() -> StateLock:
+    """The process-wide lock this GUI instance holds while it runs."""
+    return state_lock(_default_gvm_path(), label="GUI")
 
 
-def _pid_is_running(pid: int) -> bool:
-    """Return True if a process with *pid* currently exists."""
-    if sys.platform == "win32":
-        # On Windows there's no signal-0 trick; ask the OS for a handle and
-        # treat success as "still alive".
-        import ctypes
-        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        handle = ctypes.windll.kernel32.OpenProcess(
-            PROCESS_QUERY_LIMITED_INFORMATION, False, pid
-        )
-        if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        return False
-    # POSIX: signal 0 does no work but still validates the target exists.
-    try:
-        os.kill(pid, 0)
-        return True
-    except OSError:
-        return False
+# Module-level handle so _restart_gui and atexit can release the same lock.
+_gui_lock: StateLock | None = None
 
 
 def _acquire_lock() -> bool:
-    """Try to acquire the single-instance lock.
-
-    Uses a PID-based lock file created *atomically* with ``O_CREAT | O_EXCL`` so
-    two GUIs racing to start can't both believe they won (which a plain
-    "check-then-write" would allow). If the create fails because the file
-    already exists, we inspect the recorded PID: if that process is gone the
-    lock is stale, so we remove it and retry once. Returns True if the lock was
-    acquired, False if another live instance holds it.
-    """
-    lock = _lock_path()
-    lock.parent.mkdir(parents=True, exist_ok=True)
-
-    # Two attempts: the second runs only after we've cleared a stale lock.
-    for _attempt in range(2):
-        try:
-            # Atomic create-if-absent; fails with FileExistsError if held.
-            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            # Someone holds (or held) the lock. Decide if it's stale.
-            try:
-                old_pid = int(lock.read_text().strip())
-            except (ValueError, OSError):
-                # Unreadable/garbage lock — treat as stale and clear it.
-                old_pid = None
-
-            if old_pid is not None and _pid_is_running(old_pid):
-                return False  # A live instance owns the lock.
-
-            # Stale lock: remove it and loop to retry the atomic create.
-            try:
-                lock.unlink(missing_ok=True)
-            except OSError:
-                return False
-            continue
-        else:
-            # We won the race; record our PID and release the fd.
-            with os.fdopen(fd, "w") as f:
-                f.write(str(os.getpid()))
-            return True
-
-    # Both attempts failed (e.g. another process re-grabbed the stale lock).
-    return False
+    """Take the single-instance / state lock. False if another instance holds it."""
+    global _gui_lock
+    _gui_lock = _state_lock()
+    return _gui_lock.acquire()
 
 
 def _release_lock() -> None:
-    """Remove the lock file."""
-    try:
-        _lock_path().unlink(missing_ok=True)
-    except OSError:
-        pass
+    """Release the lock if this process holds it."""
+    if _gui_lock is not None:
+        _gui_lock.release()
 
 
 def launch_gui() -> None:

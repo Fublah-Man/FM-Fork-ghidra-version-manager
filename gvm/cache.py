@@ -13,6 +13,8 @@ that handles loading the file, saving it, and a couple of convenience lookups.
 """
 
 import logging
+import os
+import tempfile
 import tomllib  # standard-library TOML *reader* (Python 3.11+)
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -225,24 +227,75 @@ class Cacher:
             return cls(Cache(), cache_path)
 
         # Otherwise read and parse the TOML. If anything goes wrong (corrupt
-        # file, schema drift, ...) we log it and start fresh rather than crash —
-        # losing the cache is recoverable, a hard crash on every command is not.
+        # file, schema drift, ...) we start fresh rather than crash — a hard
+        # crash on every command is worse than a lost cache.
+        #
+        # But we do NOT silently discard the damaged file. It records every
+        # installed version, every installed extension, the default version and
+        # all preferences; the next save() would overwrite it with empty state
+        # and destroy any chance of manual recovery. Move it aside instead and
+        # tell the user exactly where it went.
         try:
             with open(cache_path, "rb") as f:
                 data = tomllib.load(f)
             cache = Cache.from_dict(data)
         except Exception as e:
-            logger.error("Failed to load old cache: %s", e)
+            salvaged = cls._preserve_corrupt(cache_path)
+            logger.error("Failed to load cache (%s)", e)
+            if salvaged is not None:
+                logger.error(
+                    "The previous cache was damaged. It has been kept at %s so "
+                    "you can recover installed-version records from it; GVM is "
+                    "starting from an empty cache.",
+                    salvaged,
+                )
             cache = Cache()
 
         return cls(cache, cache_path)
 
+    @staticmethod
+    def _preserve_corrupt(cache_path: Path) -> Optional[Path]:
+        """Move an unparseable cache aside so it isn't overwritten. Best-effort."""
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        target = cache_path.with_name(f"{cache_path.name}.corrupt-{stamp}")
+        try:
+            os.replace(cache_path, target)
+            return target
+        except OSError as e:
+            logger.debug("Couldn't preserve corrupt cache: %s", e)
+            return None
+
     def save(self) -> None:
-        # Serialise the current state and write it back out. tomli_w requires a
-        # binary file handle.
+        """Persist the cache atomically.
+
+        Writing straight to ``cache_path`` truncates it the instant the handle
+        opens, so a crash, power loss or full disk mid-write left a corrupt file
+        — and ``load`` then silently reset the user to a fresh install. Write to
+        a sibling temp file, flush it to disk, then ``os.replace`` (atomic on
+        POSIX and on Windows) so the cache is only ever fully-old or fully-new.
+        """
         data = self.cache.to_dict()
-        with open(self.cache_path, "wb") as f:
-            tomli_w.dump(data, f)
+        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Same directory as the target: os.replace is only atomic within a
+        # filesystem, and the temp dir may well be on a different one.
+        fd, tmp_name = tempfile.mkstemp(
+            dir=str(self.cache_path.parent),
+            prefix=f".{self.cache_path.name}.",
+            suffix=".tmp",
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "wb") as f:
+                tomli_w.dump(data, f)
+                f.flush()
+                # Force the bytes out before the rename, so a crash immediately
+                # after replace() can't leave a rename pointing at empty data.
+                os.fsync(f.fileno())
+            os.replace(tmp_path, self.cache_path)
+        except BaseException:
+            tmp_path.unlink(missing_ok=True)
+            raise
 
     def default_explicit(self) -> str:
         """Resolve ``default`` to a concrete tag.
